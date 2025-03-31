@@ -95,16 +95,19 @@ class RidgeModelBuilder:
         self.logger.debug(f"Initialized optimizer: {optimizer}")
 
         # Set multi-objective dimensions exactly like R
-        if calibration_input is None:
-            optimizer.tell(ng.p.MultiobjectiveReference(), (1, 1))
-            if objective_weights is None:
-                objective_weights = [1, 1]
-            optimizer.set_objective_weights(tuple(objective_weights[:2]))
-        else:
-            optimizer.tell(ng.p.MultiobjectiveReference(), (1, 1, 1))
-            if objective_weights is None:
-                objective_weights = [1, 1, 1]
-            optimizer.set_objective_weights(tuple(objective_weights[:3]))
+        try:
+            if calibration_input is None:
+                optimizer.tell(ng.p.MultiobjectiveReference(), (1, 1))
+                if objective_weights is None:
+                    objective_weights = [1, 1]
+                optimizer.set_objective_weights(tuple(objective_weights[:2]))
+            else:
+                optimizer.tell(ng.p.MultiobjectiveReference(), (1, 1, 1))
+                if objective_weights is None:
+                    objective_weights = [1, 1, 1]
+                optimizer.set_objective_weights(tuple(objective_weights[:3]))
+        except Exception as e:
+            self.logger.error(f"Error setting objective weights: {e}")
 
         # Log step5 nevergrad setup
         self.logger.debug(

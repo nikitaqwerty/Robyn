@@ -727,23 +727,25 @@ class ParetoVisualizer(BaseVisualizer):
             if self.holiday_data and self.holiday_data.prophet_vars
             else []
         )
-        factor_vars = self.mmm_data.mmmdata_spec.factor_vars if self.mmm_data else []
+        # Ensure factor_vars is always a list, never None
+        factor_vars = (self.mmm_data.mmmdata_spec.factor_vars or []) if self.mmm_data else []
+        
         if not (prophet_vars or factor_vars):
             return None
+            
         df = self.featurized_mmm_data.dt_mod.copy()
         prophet_vars_str = [variable.value for variable in prophet_vars]
         prophet_vars_str.sort(reverse=True)
-        value_variables = (
-            [
-                (
-                    "dep_var"
-                    if hasattr(df, "dep_var")
-                    else self.mmm_data.mmmdata_spec.dep_var
-                )
-            ]
-            + factor_vars
-            + prophet_vars_str
-        )
+        
+        # Handle the case where self.mmm_data.mmmdata_spec.dep_var might be None
+        dep_var = "dep_var"
+        if hasattr(df, "dep_var"):
+            dep_var = "dep_var"
+        elif self.mmm_data and hasattr(self.mmm_data.mmmdata_spec, "dep_var") and self.mmm_data.mmmdata_spec.dep_var is not None:
+            dep_var = self.mmm_data.mmmdata_spec.dep_var
+        
+        value_variables = [dep_var] + factor_vars + prophet_vars_str
+        
         df_long = df.melt(
             id_vars=["ds"],
             value_vars=value_variables,
