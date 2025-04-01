@@ -1280,7 +1280,7 @@ class ParetoVisualizer(BaseVisualizer):
                 # Keys for the specific solution to display
                 display_solution_keys = {
                     key for key in figures.keys()
-                    if key.startswith('(') and f"__{display_sol_id}" in key # Match format (criteria)__plot_solId
+                    if key.startswith('(') and f"_{display_sol_id}" in key and display_criteria in key.split('__')[0]
                 }
 
                 # Combine the display solution keys and all non-solution keys
@@ -1299,9 +1299,6 @@ class ParetoVisualizer(BaseVisualizer):
                  self.display_plots({display_criteria: figures[display_criteria]})
             else:
                 logger.warning(f"Could not find a valid solution ID or non-solution plot for the display criteria '{display_criteria}'. No plots will be displayed.")
-                # Optionally display all plots if criteria not met?
-                # logger.info("Displaying all generated plots as fallback.")
-                # self.display_plots(figures)
 
         # --- Export All Generated Plots ---
         if export_location is not None:
