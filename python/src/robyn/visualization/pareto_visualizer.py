@@ -1149,14 +1149,10 @@ class ParetoVisualizer(BaseVisualizer):
         all_results_df = self.unfiltered_pareto_result.result_hyp_param
 
         criteria_metrics = {
-            # "all_best_rsq_train": (all_results_df, 'rsq_train', False),
-            # "all_best_rsq_test": (all_results_df, 'rsq_test', False),
-            "cleaned_best_rsq_train": (cleaned_results_df, 'rsq_train', False),
-            "cleaned_best_rsq_test": (cleaned_results_df, 'rsq_test', False),
-            # "all_best_nrmse_train": (all_results_df, 'nrmse_train', True), # Lower NRMSE is better
-            # "all_best_nrmse_test": (all_results_df, 'nrmse_test', True),  # Lower NRMSE is better
-            "cleaned_best_nrmse_train": (cleaned_results_df, 'nrmse_train', True), # Lower NRMSE is better
-            "cleaned_best_nrmse_test": (cleaned_results_df, 'nrmse_test', True),  # Lower NRMSE is better
+            "best_rsq_train": (cleaned_results_df, 'rsq_train', False),
+            "best_rsq_test": (cleaned_results_df, 'rsq_test', False),
+            "best_nrmse_train": (cleaned_results_df, 'nrmse_train', True), # Lower NRMSE is better
+            "best_nrmse_test": (cleaned_results_df, 'nrmse_test', True),  # Lower NRMSE is better
         }
 
         for key, (df, metric, ascending) in criteria_metrics.items():
