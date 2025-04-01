@@ -1005,3 +1005,6 @@ class ParetoVisualizer(BaseVisualizer):
         # Display plots if required
         if display_plots:
             self.display_plots(figures)
+        
+        if export_location is not None:
+            self.export_plots_fig(export_location, figures)

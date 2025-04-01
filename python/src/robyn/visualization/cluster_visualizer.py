@@ -637,7 +637,7 @@ class ClusterVisualizer(BaseVisualizer):
                 logger.error(f"Failed to create correlations heatmap: {e}")
 
             try:
-                solution_ids = self.pareto_result.plot_data_collect.keys()
+                solution_ids = [self.pareto_result.pareto_solutions[0]]#self.pareto_result.plot_data_collect.keys()
                 for solution_id in solution_ids:
                     bootstrap_confidence_plot = self.generate_bootstrap_confidence(
                         solution_id
@@ -653,3 +653,6 @@ class ClusterVisualizer(BaseVisualizer):
 
         if display_plots:
             super().display_plots(plots)
+
+        if export_location is not None:
+            self.export_plots_fig(export_location, plots)
