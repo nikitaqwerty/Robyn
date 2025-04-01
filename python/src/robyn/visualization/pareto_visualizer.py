@@ -1088,7 +1088,7 @@ class ParetoVisualizer(BaseVisualizer):
         self,
         display_plots: bool = True,
         export_location: Union[str, Path] = None,
-        display_criteria: str = "cleaned_best_rsq_train",
+        display_criteria: str = "best_rsq_train",
     ) -> None:
         """
         Generates and manages plots for Pareto results based on specified criteria.
@@ -1103,11 +1103,9 @@ class ParetoVisualizer(BaseVisualizer):
             display_plots: If True, displays the plots selected by `display_criteria`.
             export_location: Path to export all generated plots.
             display_criteria: Key specifying which set of plots to display.
-                              Valid keys: 'all_best_rsq_train', 'all_best_rsq_test',
-                              'cleaned_best_rsq_train', 'cleaned_best_rsq_test',
-                              'all_best_nrmse_train', 'all_best_nrmse_test',
-                              'cleaned_best_nrmse_train', 'cleaned_best_nrmse_test'.
-                              Defaults to 'cleaned_best_rsq_train'.
+                              Valid keys: 'best_rsq_train', 'best_rsq_test',
+                              'best_nrmse_train', 'best_nrmse_test'.
+                              Defaults to 'best_rsq_train'.
         """
         figures: Dict[str, plt.Figure] = {}
         target_solutions: Dict[str, Optional[str]] = {} # To store solution IDs based on criteria
