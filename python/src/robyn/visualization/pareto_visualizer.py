@@ -1124,14 +1124,18 @@ class ParetoVisualizer(BaseVisualizer):
                      logger.warning(f"No valid data for metric '{metric}' after dropping NaNs.")
                      return None
                 sorted_df = df_filtered.sort_values(metric, ascending=ascending)
-                # Handle potential index vs column 'sol_id'
+                # Handle potential index vs column 'sol_id' or 'solID'
                 if 'sol_id' in sorted_df.columns:
                     best_id = sorted_df.iloc[0]['sol_id']
+                elif 'solID' in sorted_df.columns: # Check for 'solID'
+                    best_id = sorted_df.iloc[0]['solID']
                 elif sorted_df.index.name == 'sol_id' or 'sol_id' in str(sorted_df.index): # Check if index is sol_id
                      best_id = sorted_df.index[0]
-                else: # Fallback if sol_id is neither column nor index name
-                     logger.warning(f"Cannot determine 'sol_id' column or index in DataFrame for metric '{metric}'. Using first index.")
+                elif sorted_df.index.name == 'solID' or 'solID' in str(sorted_df.index): # Check if index is solID
                      best_id = sorted_df.index[0]
+                else: # Fallback if neither column nor index name is found
+                     logger.warning(f"Cannot determine 'sol_id' or 'solID' column or index in DataFrame for metric '{metric}'. Using first index.")
+                     best_id = sorted_df.index[0] # This might still fail if index is not numeric/string
                 return str(best_id) # Ensure it's a string
             except IndexError:
                  logger.warning(f"IndexError while getting best solution for {metric}. DataFrame might be empty after filtering.")
@@ -1174,20 +1178,25 @@ class ParetoVisualizer(BaseVisualizer):
         metrics_data_all = None # Initialize
 
         if all_results_df is not None and not all_results_df.empty:
-            # Check if 'sol_id' is already the index
-            if all_results_df.index.name == 'sol_id':
+            sol_id_col = None # Determine the correct solution ID column name
+            if 'sol_id' in all_results_df.columns:
+                sol_id_col = 'sol_id'
+            elif 'solID' in all_results_df.columns:
+                sol_id_col = 'solID'
+
+            # Check if 'sol_id' or 'solID' is already the index
+            if all_results_df.index.name in ['sol_id', 'solID']:
                 metrics_data_all = all_results_df
-            # Check if 'sol_id' is a column
-            elif 'sol_id' in all_results_df.columns:
+            # Check if 'sol_id' or 'solID' is a column and set it as index
+            elif sol_id_col:
                 try:
-                    # Create a new view with 'sol_id' as index, avoid modifying original
-                    # set_index returns a new DataFrame by default (drop=False keeps the column)
-                    metrics_data_all = all_results_df.set_index('sol_id', drop=False)
+                    # Create a new view with the correct sol id column as index
+                    metrics_data_all = all_results_df.set_index(sol_id_col, drop=False)
                 except Exception as e:
-                    logger.warning(f"Error setting 'sol_id' as index: {e}. Proceeding with original structure.")
+                    logger.warning(f"Error setting '{sol_id_col}' as index: {e}. Proceeding with original structure.")
                     metrics_data_all = all_results_df # Fallback
             else:
-                 logger.warning("Could not find 'sol_id' as index or column in unfiltered results. Proceeding.")
+                 logger.warning("Could not find 'sol_id' or 'solID' as index or column in unfiltered results. Proceeding.")
                  metrics_data_all = all_results_df # Assign anyway
         else:
              logger.warning("Unfiltered results DataFrame is missing or empty. Cannot fetch metrics.")
