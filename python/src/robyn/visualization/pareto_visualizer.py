@@ -94,7 +94,7 @@ class ParetoVisualizer(BaseVisualizer):
             return f"{x:.1f}"
 
     def generate_waterfall(
-        self, solution_id: str, ax: Optional[plt.Axes] = None, baseline_level: int = 0
+        self, solution_id: str, ax: Optional[plt.Axes] = None, baseline_level: int = 0, metrics: Optional[Dict[str, float]] = None
     ) -> Optional[plt.Figure]:
         """Generate waterfall chart for specific solution."""
 
@@ -229,13 +229,32 @@ class ParetoVisualizer(BaseVisualizer):
         if fig:
             plt.subplots_adjust(right=0.85, top=0.85)
             fig = plt.gcf()
+            # Add metrics text if available
+            if metrics:
+                metrics_to_display = {
+                    k: metrics.get(k, float('nan')) # Use NaN for missing metrics
+                    for k in ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+                }
+                metrics_str_lines = [
+                    f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+                    f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+                    f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}"
+                ]
+                # Place text below the title
+                fig.text(0.5, 0.95, f"Metrics for Solution {solution_id}", ha='center', va='bottom', fontsize=10, weight='bold')
+                fig.text(0.5, 0.93, metrics_str_lines[0], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.91, metrics_str_lines[1], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.89, metrics_str_lines[2], ha='center', va='top', fontsize=9, color='grey')
+                # Adjust top margin to make space for the text
+                plt.subplots_adjust(top=0.84) # Reduced top margin further
+
             plt.close(fig)
             return fig
 
         return None
 
     def generate_fitted_vs_actual(
-        self, solution_id: str, ax: Optional[plt.Axes] = None
+        self, solution_id: str, ax: Optional[plt.Axes] = None, metrics: Optional[Dict[str, float]] = None
     ) -> Optional[plt.Figure]:
         """Generate time series plot comparing fitted vs actual values.
 
@@ -390,12 +409,31 @@ class ParetoVisualizer(BaseVisualizer):
             plt.tight_layout()
             plt.subplots_adjust(top=0.85)
             fig = plt.gcf()
+            # Add metrics text if available
+            if metrics:
+                metrics_to_display = {
+                    k: metrics.get(k, float('nan')) # Use NaN for missing metrics
+                    for k in ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+                }
+                metrics_str_lines = [
+                    f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+                    f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+                    f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}"
+                ]
+                # Place text below the title
+                fig.text(0.5, 0.95, f"Metrics for Solution {solution_id}", ha='center', va='bottom', fontsize=10, weight='bold')
+                fig.text(0.5, 0.93, metrics_str_lines[0], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.91, metrics_str_lines[1], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.89, metrics_str_lines[2], ha='center', va='top', fontsize=9, color='grey')
+                # Adjust top margin to make space for the text
+                plt.subplots_adjust(top=0.84) # Adjust top margin
+
             plt.close(fig)
             return fig
         return None
 
     def generate_diagnostic_plot(
-        self, solution_id: str, ax: Optional[plt.Axes] = None
+        self, solution_id: str, ax: Optional[plt.Axes] = None, metrics: Optional[Dict[str, float]] = None
     ) -> Optional[plt.Figure]:
         """Generate diagnostic scatter plot of fitted vs residual values.
 
@@ -478,12 +516,31 @@ class ParetoVisualizer(BaseVisualizer):
         if fig:
             plt.tight_layout()
             fig = plt.gcf()
+            # Add metrics text if available
+            if metrics:
+                metrics_to_display = {
+                    k: metrics.get(k, float('nan')) # Use NaN for missing metrics
+                    for k in ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+                }
+                metrics_str_lines = [
+                    f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+                    f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+                    f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}"
+                ]
+                # Place text below the title
+                fig.text(0.5, 0.95, f"Metrics for Solution {solution_id}", ha='center', va='bottom', fontsize=10, weight='bold')
+                fig.text(0.5, 0.93, metrics_str_lines[0], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.91, metrics_str_lines[1], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.89, metrics_str_lines[2], ha='center', va='top', fontsize=9, color='grey')
+                # Adjust top margin to make space for the text
+                plt.subplots_adjust(top=0.84) # Adjust top margin
+
             plt.close(fig)
             return fig
         return None
 
     def generate_immediate_vs_carryover(
-        self, solution_id: str, ax: Optional[plt.Axes] = None
+        self, solution_id: str, ax: Optional[plt.Axes] = None, metrics: Optional[Dict[str, float]] = None
     ) -> Optional[plt.Figure]:
         """Generate stacked bar chart comparing immediate vs carryover effects.
 
@@ -591,12 +648,31 @@ class ParetoVisualizer(BaseVisualizer):
             plt.tight_layout()
             plt.subplots_adjust(top=0.85)
             fig = plt.gcf()
+            # Add metrics text if available
+            if metrics:
+                metrics_to_display = {
+                    k: metrics.get(k, float('nan')) # Use NaN for missing metrics
+                    for k in ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+                }
+                metrics_str_lines = [
+                    f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+                    f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+                    f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}"
+                ]
+                # Place text below the title
+                fig.text(0.5, 0.95, f"Metrics for Solution {solution_id}", ha='center', va='bottom', fontsize=10, weight='bold')
+                fig.text(0.5, 0.93, metrics_str_lines[0], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.91, metrics_str_lines[1], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.89, metrics_str_lines[2], ha='center', va='top', fontsize=9, color='grey')
+                # Adjust top margin to make space for the text
+                plt.subplots_adjust(top=0.84) # Adjust top margin
+
             plt.close(fig)
             return fig
         return None
 
     def generate_adstock_rate(
-        self, solution_id: str, ax: Optional[plt.Axes] = None
+        self, solution_id: str, ax: Optional[plt.Axes] = None, metrics: Optional[Dict[str, float]] = None
     ) -> Optional[plt.Figure]:
         """Generate adstock rate visualization based on adstock type.
 
@@ -716,6 +792,25 @@ class ParetoVisualizer(BaseVisualizer):
         if fig:
             plt.tight_layout()
             fig = plt.gcf()
+            # Add metrics text if available
+            if metrics:
+                metrics_to_display = {
+                    k: metrics.get(k, float('nan')) # Use NaN for missing metrics
+                    for k in ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+                }
+                metrics_str_lines = [
+                    f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+                    f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+                    f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}"
+                ]
+                # Place text below the title
+                fig.text(0.5, 0.95, f"Metrics for Solution {solution_id}", ha='center', va='bottom', fontsize=10, weight='bold')
+                fig.text(0.5, 0.93, metrics_str_lines[0], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.91, metrics_str_lines[1], ha='center', va='top', fontsize=9, color='grey')
+                fig.text(0.5, 0.89, metrics_str_lines[2], ha='center', va='top', fontsize=9, color='grey')
+                # Adjust top margin to make space for the text
+                plt.subplots_adjust(top=0.84) # Adjust top margin
+
             plt.close(fig)
             return fig
         return None
@@ -966,24 +1061,43 @@ class ParetoVisualizer(BaseVisualizer):
         self.pareto_result.pareto_solutions = cleaned_solution_ids
         figures: Dict[str, plt.Figure] = {}
 
+        # Define the metrics columns to fetch
+        metric_cols = ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
+
+        # Fetch metrics data once
+        metrics_data = None
+        if self.pareto_result.result_hyp_param is not None and not self.pareto_result.result_hyp_param.empty:
+             # Ensure sol_id is the index or a column
+            if 'sol_id' in self.pareto_result.result_hyp_param.columns:
+                metrics_data = self.pareto_result.result_hyp_param.set_index('sol_id')
+            else: # Assuming sol_id might already be the index
+                 metrics_data = self.pareto_result.result_hyp_param
+
         for solution_id in cleaned_solution_ids:
-            fig1 = self.generate_waterfall(solution_id)
+            solution_metrics = {}
+            if metrics_data is not None and solution_id in metrics_data.index:
+                # Check which metric columns actually exist in the dataframe
+                available_metrics = [col for col in metric_cols if col in metrics_data.columns]
+                if available_metrics:
+                    solution_metrics = metrics_data.loc[solution_id, available_metrics].to_dict()
+
+            fig1 = self.generate_waterfall(solution_id, metrics=solution_metrics)
             if fig1:
                 figures["waterfall_" + solution_id] = fig1
 
-            fig2 = self.generate_fitted_vs_actual(solution_id)
+            fig2 = self.generate_fitted_vs_actual(solution_id, metrics=solution_metrics)
             if fig2:
                 figures["fitted_vs_actual_" + solution_id] = fig2
 
-            fig3 = self.generate_diagnostic_plot(solution_id)
+            fig3 = self.generate_diagnostic_plot(solution_id, metrics=solution_metrics)
             if fig3:
                 figures["diagnostic_plot_" + solution_id] = fig3
 
-            fig4 = self.generate_immediate_vs_carryover(solution_id)
+            fig4 = self.generate_immediate_vs_carryover(solution_id, metrics=solution_metrics)
             if fig4:
                 figures["immediate_vs_carryover_" + solution_id] = fig4
 
-            fig5 = self.generate_adstock_rate(solution_id)
+            fig5 = self.generate_adstock_rate(solution_id, metrics=solution_metrics)
             if fig5:
                 figures["adstock_rate_" + solution_id] = fig5
 
