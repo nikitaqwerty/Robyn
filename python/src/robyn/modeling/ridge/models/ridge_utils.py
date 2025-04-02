@@ -68,9 +68,18 @@ def create_ridge_model_sklearn(
             self.logger.debug(f"sy mean: {np.mean(np.abs(y_centered))}")
             self.logger.debug(f"lambda: {self.lambda_value}")
 
+            # Determine n_samples for scaling
+            n_samples = X.shape[0]
+            if n_samples == 0:
+                raise ValueError("Cannot fit model with 0 samples")
+
+            # Scale lambda for sklearn's Ridge (alpha = lambda / n_samples when standardized)
+            sklearn_alpha = self.lambda_value / n_samples
+            self.logger.debug(f"n_samples: {n_samples}, sklearn_alpha: {sklearn_alpha}")
+
             # Fit model using raw lambda (not scaled)
             model = Ridge(
-                alpha=self.lambda_value,
+                alpha=sklearn_alpha,  # Use scaled alpha
                 fit_intercept=False,  # We handle centering manually
                 solver="cholesky",
             )
