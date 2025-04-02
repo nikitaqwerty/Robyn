@@ -866,7 +866,8 @@ class ParetoVisualizer(BaseVisualizer):
         if not (prophet_vars or factor_vars):
             return None
             
-        df = self.featurized_mmm_data.dt_mod.copy()
+        # Avoid copying the dataframe if it's only used for reading/melting
+        df = self.featurized_mmm_data.dt_mod
         prophet_vars_str = [variable.value for variable in prophet_vars]
         prophet_vars_str.sort(reverse=True)
         
@@ -961,9 +962,9 @@ class ParetoVisualizer(BaseVisualizer):
     def create_pareto_front_plot(self, is_calibrated):
         """Create Pareto Front Plot."""
         unfiltered_pareto_results = self.unfiltered_pareto_result
-        result_hyp_param = unfiltered_pareto_results.result_hyp_param
-        pareto_fronts = self.pareto_result.pareto_fronts
+        # Only copy if modifications are needed (is_calibrated=True) to prevent side effects
         if is_calibrated:
+            result_hyp_param = unfiltered_pareto_results.result_hyp_param.copy()
             result_hyp_param["iterations"] = np.where(
                 result_hyp_param["robynPareto"].isna(),
                 np.nan,
@@ -972,6 +973,11 @@ class ParetoVisualizer(BaseVisualizer):
             result_hyp_param = result_hyp_param.sort_values(
                 by="robynPareto", na_position="first"
             )
+        else:
+            # Use the original dataframe reference if no modifications are needed
+            result_hyp_param = unfiltered_pareto_results.result_hyp_param
+
+        pareto_fronts = self.pareto_result.pareto_fronts
         pareto_fronts_vec = list(range(1, pareto_fronts + 1))
         plt.figure(figsize=(12, 8))
         scatter = plt.scatter(
