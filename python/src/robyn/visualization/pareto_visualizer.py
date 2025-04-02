@@ -1074,7 +1074,6 @@ class ParetoVisualizer(BaseVisualizer):
                     offset += 1
                 axes[idx].set_title(f"{var} {metric}")
                 axes[idx].set_ylabel("")
-                axes[idx].legend().remove()
                 axes[idx].spines["right"].set_visible(False)
                 axes[idx].spines["top"].set_visible(False)
             plt.suptitle(f"{metric} Distribution over Iteration Buckets", fontsize=16)
@@ -1091,50 +1090,54 @@ class ParetoVisualizer(BaseVisualizer):
         display_criteria: str = "best_rsq_train",
     ) -> None:
         """
-        Generates and manages plots for Pareto results based on specified criteria.
+        Generates and manages plots for Pareto results based on specified criteria,
+        optimized for memory efficiency.
 
-        It identifies specific 'best' solutions based on R-squared and NRMSE metrics
-        from both cleaned (Pareto front) and all (unfiltered) results. Plots are
-        generated for all these identified unique solutions. All generated plots
-        can be exported. Only plots corresponding to a specific criterion
-        (controlled by `display_criteria`) are displayed interactively.
+        Plots are generated iteratively. If exporting, they are saved immediately.
+        If displaying, only the figures matching `display_criteria` are kept in memory
+        temporarily for display. All figures are closed after processing to release memory.
 
         Args:
             display_plots: If True, displays the plots selected by `display_criteria`.
-            export_location: Path to export all generated plots.
+            export_location: Path to export all generated plots. If provided, plots
+                             are saved iteratively.
             display_criteria: Key specifying which set of plots to display.
                               Valid keys: 'best_rsq_train', 'best_rsq_test',
-                              'best_nrmse_train', 'best_nrmse_test'.
+                              'best_nrmse_train', 'best_nrmse_test', or keys of
+                              non-solution specific plots like 'prophet_decomp'.
                               Defaults to 'best_rsq_train'.
         """
-        figures: Dict[str, plt.Figure] = {}
+        figures_to_display: Dict[str, plt.Figure] = {}
         target_solutions: Dict[str, Optional[str]] = {} # To store solution IDs based on criteria
+        export_path: Optional[Path] = None
 
-        # Helper function to safely get the best solution ID
+        if export_location:
+            export_path = Path(export_location)
+            export_path.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Exporting plots enabled. Target directory: {export_path}")
+
+        # Helper function to safely get the best solution ID (remains the same)
         def get_best_sol_id(df, metric, ascending) -> Optional[str]:
             if df is None or df.empty or metric not in df.columns:
-                logger.warning(f"Metric '{metric}' not found or DataFrame is empty.")
+                logger.warning(f"Metric '{metric}' not found or DataFrame is empty for identifying best solution.")
                 return None
             try:
-                # Drop rows where the metric is NaN before sorting
                 df_filtered = df.dropna(subset=[metric])
                 if df_filtered.empty:
                      logger.warning(f"No valid data for metric '{metric}' after dropping NaNs.")
                      return None
                 sorted_df = df_filtered.sort_values(metric, ascending=ascending)
-                # Handle potential index vs column 'sol_id' or 'solID'
-                if 'sol_id' in sorted_df.columns:
-                    best_id = sorted_df.iloc[0]['sol_id']
-                elif 'solID' in sorted_df.columns: # Check for 'solID'
-                    best_id = sorted_df.iloc[0]['solID']
-                elif sorted_df.index.name == 'sol_id' or 'sol_id' in str(sorted_df.index): # Check if index is sol_id
+                sol_id_col = next((col for col in ['sol_id', 'solID'] if col in sorted_df.columns), None)
+                index_is_sol_id = sorted_df.index.name in ['sol_id', 'solID']
+
+                if sol_id_col:
+                    best_id = sorted_df.iloc[0][sol_id_col]
+                elif index_is_sol_id:
+                    best_id = sorted_df.index[0]
+                else:
+                     logger.warning(f"Cannot determine 'sol_id' or 'solID' in DataFrame for metric '{metric}'. Using first index.")
                      best_id = sorted_df.index[0]
-                elif sorted_df.index.name == 'solID' or 'solID' in str(sorted_df.index): # Check if index is solID
-                     best_id = sorted_df.index[0]
-                else: # Fallback if neither column nor index name is found
-                     logger.warning(f"Cannot determine 'sol_id' or 'solID' column or index in DataFrame for metric '{metric}'. Using first index.")
-                     best_id = sorted_df.index[0] # This might still fail if index is not numeric/string
-                return str(best_id) # Ensure it's a string
+                return str(best_id)
             except IndexError:
                  logger.warning(f"IndexError while getting best solution for {metric}. DataFrame might be empty after filtering.")
                  return None
@@ -1142,168 +1145,187 @@ class ParetoVisualizer(BaseVisualizer):
                 logger.warning(f"Error getting best solution for {metric}: {e}")
                 return None
 
-        # --- Identify Target Solutions ---
+        # --- Identify Target Solutions (remains the same) ---
         cleaned_results_df = self.pareto_result.result_hyp_param
-        all_results_df = self.unfiltered_pareto_result.result_hyp_param
+        all_results_df = self.unfiltered_pareto_result.result_hyp_param if self.unfiltered_pareto_result else None
 
         criteria_metrics = {
-            "best_rsq_train": (cleaned_results_df, 'rsq_train', False),
-            "best_rsq_test": (cleaned_results_df, 'rsq_test', False),
-            "best_nrmse_train": (cleaned_results_df, 'nrmse_train', True), # Lower NRMSE is better
-            "best_nrmse_test": (cleaned_results_df, 'nrmse_test', True),  # Lower NRMSE is better
+            "best_rsq_train": ('rsq_train', False),
+            "best_rsq_test": ('rsq_test', False),
+            "best_nrmse_train": ('nrmse_train', True),
+            "best_nrmse_test": ('nrmse_test', True),
         }
 
-        for key, (df, metric, ascending) in criteria_metrics.items():
-            target_solutions[key] = get_best_sol_id(df, metric, ascending)
+        for key, (metric, ascending) in criteria_metrics.items():
+            # Try finding in cleaned results first, fallback to all results if needed/available
+            best_id = get_best_sol_id(cleaned_results_df, metric, ascending)
+            # Optional: Fallback to all_results_df if not found in cleaned? Depends on desired behavior.
+            # if best_id is None and all_results_df is not None:
+            #     best_id = get_best_sol_id(all_results_df, metric, ascending)
+            target_solutions[key] = best_id
             logger.info(f"Identified solution for {key}: {target_solutions[key]}")
 
-        # Filter out None values and get unique solution IDs to plot
         solution_ids_to_plot = sorted(list(set(filter(None, target_solutions.values()))))
 
-        if not solution_ids_to_plot:
-            logger.warning("Could not find any valid solution IDs based on the criteria. No solution-specific plots will be generated.")
-            # Still proceed to generate non-solution specific plots
-        else:
-            logger.info(f"Generating plots for unique solution IDs: {solution_ids_to_plot}")
+        # Determine the specific solution ID to display plots for
+        display_sol_id = target_solutions.get(display_criteria) if display_criteria in target_solutions else None
+        logger.info(f"Display criteria '{display_criteria}' targets solution ID: {display_sol_id}")
 
-
-        # --- Fetch Metrics Data for All Solutions (use unfiltered results for consistency) ---
+        # --- Fetch Metrics Data (remains similar, ensure robust indexing) ---
         metric_cols = ['rsq_train', 'rsq_val', 'rsq_test', 'nrmse', 'nrmse_train', 'nrmse_val', 'nrmse_test', 'decomp.rssd']
-        metrics_data_all = None # Initialize
-
+        metrics_data_all_indexed = None # Use a version indexed by sol_id
         if all_results_df is not None and not all_results_df.empty:
-            sol_id_col = None # Determine the correct solution ID column name
-            if 'sol_id' in all_results_df.columns:
-                sol_id_col = 'sol_id'
-            elif 'solID' in all_results_df.columns:
-                sol_id_col = 'solID'
+            sol_id_col = next((col for col in ['sol_id', 'solID'] if col in all_results_df.columns), None)
+            index_is_sol_id = all_results_df.index.name in ['sol_id', 'solID']
 
-            # Check if 'sol_id' or 'solID' is already the index
-            if all_results_df.index.name in ['sol_id', 'solID']:
-                metrics_data_all = all_results_df
-            # Check if 'sol_id' or 'solID' is a column and set it as index
+            if index_is_sol_id:
+                 metrics_data_all_indexed = all_results_df
             elif sol_id_col:
                 try:
-                    # Create a new view with the correct sol id column as index
-                    metrics_data_all = all_results_df.set_index(sol_id_col, drop=False)
+                    # Avoid modifying original df, ensure index contains unique IDs
+                    if all_results_df[sol_id_col].is_unique:
+                         metrics_data_all_indexed = all_results_df.set_index(sol_id_col, drop=False)
+                    else:
+                         logger.warning(f"Solution ID column '{sol_id_col}' is not unique. Cannot reliably index by it. Metrics might be inaccurate.")
+                         # Fallback or handle duplicates if necessary
+                         metrics_data_all_indexed = all_results_df # Keep original, lookup will be slower
                 except Exception as e:
                     logger.warning(f"Error setting '{sol_id_col}' as index: {e}. Proceeding with original structure.")
-                    metrics_data_all = all_results_df # Fallback
+                    metrics_data_all_indexed = all_results_df # Fallback
             else:
-                 logger.warning("Could not find 'sol_id' or 'solID' as index or column in unfiltered results. Proceeding.")
-                 metrics_data_all = all_results_df # Assign anyway
+                 logger.warning("Could not find 'sol_id' or 'solID' as index or column in unfiltered results. Metrics might not be displayed.")
+                 metrics_data_all_indexed = all_results_df # Fallback
         else:
              logger.warning("Unfiltered results DataFrame is missing or empty. Cannot fetch metrics.")
 
 
-        # --- Generate Plots for Unique Target Solutions ---
-        plot_funcs = {
-            "waterfall": self.generate_waterfall,
-            "fitted_vs_actual": self.generate_fitted_vs_actual,
-            "diagnostic_plot": self.generate_diagnostic_plot,
-            "immediate_vs_carryover": self.generate_immediate_vs_carryover,
-            "adstock_rate": self.generate_adstock_rate,
-        }
+        # --- Helper to process (save/display) a generated figure ---
+        def process_figure(fig: Optional[plt.Figure], plot_key: str, is_solution_plot: bool, sol_id: Optional[str] = None):
+            if not fig:
+                logger.warning(f"Plot function returned None for key '{plot_key}'" + (f" (Solution: {sol_id})" if sol_id else ""))
+                return
 
-        for solution_id in solution_ids_to_plot:
-            solution_metrics = {}
-            if metrics_data_all is not None and solution_id in metrics_data_all.index:
-                # Check which metric columns actually exist in the dataframe
-                available_metrics = [col for col in metric_cols if col in metrics_data_all.columns]
-                if available_metrics:
+            should_display = False
+            if display_plots:
+                if is_solution_plot:
+                     # Display if it's the target solution and the criteria matches the plot's origin criteria
+                     criteria_keys_for_sol = [k for k, v in target_solutions.items() if v == sol_id]
+                     if sol_id == display_sol_id and display_criteria in criteria_keys_for_sol:
+                          should_display = True
+                elif plot_key == display_criteria: # Display non-solution plot if its key matches criteria
+                     should_display = True
+
+            saved = False
+            if export_path:
+                try:
+                    filename = export_path / f"{plot_key}.png"
+                    fig.savefig(filename, bbox_inches='tight')
+                    logger.debug(f"Exported plot: {filename}")
+                    saved = True
+                except Exception as e:
+                    logger.error(f"Error exporting plot '{plot_key}': {e}", exc_info=True)
+
+            if should_display:
+                figures_to_display[plot_key] = fig # Keep figure open for display
+            else:
+                plt.close(fig) # Close figure if not needed for display
+
+        # --- Generate Non-Solution Specific Plots ---
+        if not self.model_outputs.hyper_fixed:
+            non_solution_plot_funcs = {
+                "prophet_decomp": self.create_prophet_decomposition_plot,
+                "hyperparameters_sampling": self.create_hyperparameter_sampling_distribution,
+                "pareto_front": lambda: self.create_pareto_front_plot(is_calibrated=False), # Use lambda for args
+                # Ridgeline returns a dict, handle separately
+            }
+            for key, func in non_solution_plot_funcs.items():
+                 try:
+                      fig = func()
+                      process_figure(fig, key, is_solution_plot=False)
+                 except Exception as e:
+                      logger.error(f"Error generating non-solution plot '{key}': {e}", exc_info=True)
+
+            # Handle Ridgeline separately as it returns multiple plots
+            try:
+                ridgeline_plots = self.create_ridgeline_model_convergence()
+                if ridgeline_plots:
+                    for key, fig in ridgeline_plots.items():
+                         process_figure(fig, key, is_solution_plot=False)
+            except Exception as e:
+                 logger.error(f"Error generating ridgeline convergence plots: {e}", exc_info=True)
+
+
+        # --- Generate Plots for Unique Target Solutions ---
+        if not solution_ids_to_plot:
+             logger.warning("Could not find any valid solution IDs based on the criteria. No solution-specific plots will be generated.")
+        else:
+            logger.info(f"Generating plots for unique solution IDs: {solution_ids_to_plot}")
+            plot_funcs_solution = {
+                "waterfall": self.generate_waterfall,
+                "fitted_vs_actual": self.generate_fitted_vs_actual,
+                "diagnostic_plot": self.generate_diagnostic_plot,
+                "immediate_vs_carryover": self.generate_immediate_vs_carryover,
+                "adstock_rate": self.generate_adstock_rate,
+            }
+
+            for solution_id in solution_ids_to_plot:
+                solution_metrics = {}
+                if metrics_data_all_indexed is not None:
+                    # Check which metric columns actually exist in the dataframe
+                    available_metrics = [col for col in metric_cols if col in metrics_data_all_indexed.columns]
                     try:
-                        solution_metrics = metrics_data_all.loc[solution_id, available_metrics].to_dict()
+                        # Use .loc for index-based lookup if indexed, otherwise filter
+                        if metrics_data_all_indexed.index.name in ['sol_id', 'solID'] and solution_id in metrics_data_all_indexed.index:
+                             solution_metrics = metrics_data_all_indexed.loc[solution_id, available_metrics].to_dict()
+                        else: # Fallback to filtering if not indexed or ID not in index
+                             sol_id_col_lookup = next((col for col in ['sol_id', 'solID'] if col in metrics_data_all_indexed.columns), None)
+                             if sol_id_col_lookup:
+                                 row = metrics_data_all_indexed[metrics_data_all_indexed[sol_id_col_lookup] == solution_id]
+                                 if not row.empty:
+                                      solution_metrics = row.iloc[0][available_metrics].to_dict()
+                                 else:
+                                      logger.warning(f"Solution ID {solution_id} not found via filtering.")
+                             else:
+                                  logger.warning(f"Cannot find solution ID {solution_id} as index or column.")
+
                     except KeyError:
                         logger.warning(f"KeyError fetching metrics for solution {solution_id}. Skipping metrics display for this solution.")
                     except Exception as e:
                          logger.warning(f"Error fetching metrics for solution {solution_id}: {e}. Skipping metrics display.")
-            else:
-                logger.warning(f"Metrics data not available or solution ID {solution_id} not found in metrics index.")
-
-
-            # Find the criteria keys associated with this solution_id
-            criteria_keys = sorted([k for k, v in target_solutions.items() if v == solution_id]) # Sort for consistent naming
-
-            for plot_name, plot_func in plot_funcs.items():
-                try:
-                    fig = plot_func(solution_id=solution_id, metrics=solution_metrics)
-                    if fig:
-                        # Store with descriptive name including criteria and solution ID
-                        criteria_str = '_'.join(criteria_keys)
-                        full_name = f"({criteria_str})__{plot_name}_{solution_id}"
-                        figures[full_name] = fig
-                        logger.debug(f"Generated plot: {full_name}")
-                    else:
-                         logger.warning(f"Plot function for '{plot_name}' returned None for solution {solution_id}.")
-                except Exception as e:
-                     logger.error(f"Error generating plot '{plot_name}' for solution {solution_id}: {e}", exc_info=True)
-
-
-        # --- Generate Non-Solution Specific Plots ---
-        non_solution_plots_generated = {}
-        if not self.model_outputs.hyper_fixed:
-            try:
-                prophet_decomp_plot = self.create_prophet_decomposition_plot()
-                if prophet_decomp_plot:
-                    non_solution_plots_generated["prophet_decomp"] = prophet_decomp_plot
-            except Exception as e:
-                 logger.error(f"Error generating prophet decomposition plot: {e}", exc_info=True)
-
-            try:
-                hyperparameters_plot = self.create_hyperparameter_sampling_distribution()
-                if hyperparameters_plot:
-                    non_solution_plots_generated["hyperparameters_sampling"] = hyperparameters_plot
-            except Exception as e:
-                 logger.error(f"Error generating hyperparameter sampling plot: {e}", exc_info=True)
-
-            try:
-                pareto_front_plot = self.create_pareto_front_plot(is_calibrated=False) # Assuming non-calibrated for general case
-                if pareto_front_plot:
-                    non_solution_plots_generated["pareto_front"] = pareto_front_plot
-            except Exception as e:
-                 logger.error(f"Error generating pareto front plot: {e}", exc_info=True)
-
-            try:
-                ridgeline_plots = self.create_ridgeline_model_convergence()
-                if ridgeline_plots: # Returns a dict
-                     non_solution_plots_generated.update(ridgeline_plots)
-            except Exception as e:
-                 logger.error(f"Error generating ridgeline convergence plots: {e}", exc_info=True)
-
-        figures.update(non_solution_plots_generated) # Add generated non-solution plots to the main figures dict
-
-
-        # --- Display Plots Based on Criteria ---
-        if display_plots:
-            display_sol_id = target_solutions.get(display_criteria)
-            if display_sol_id:
-                # Keys for the specific solution to display
-                display_solution_keys = {
-                    key for key in figures.keys()
-                    if key.startswith('(') and f"_{display_sol_id}" in key and display_criteria in key.split('__')[0]
-                }
-
-                # Combine the display solution keys and all non-solution keys
-                keys_to_display = display_solution_keys.union(set(non_solution_plots_generated.keys()))
-
-                display_figures = {k: figures[k] for k in keys_to_display if k in figures}
-
-                if display_figures:
-                     logger.info(f"Displaying {len(display_figures)} plots for criteria '{display_criteria}' (Solution ID: {display_sol_id}).")
-                     self.display_plots(display_figures)
                 else:
-                     logger.warning(f"No plots found to display for criteria '{display_criteria}' and solution ID '{display_sol_id}'.")
-            elif display_criteria in non_solution_plots_generated:
-                 # Handle case where a non-solution plot key is passed as criteria
-                 logger.info(f"Displaying non-solution plot: {display_criteria}")
-                 self.display_plots({display_criteria: figures[display_criteria]})
-            else:
-                logger.warning(f"Could not find a valid solution ID or non-solution plot for the display criteria '{display_criteria}'. No plots will be displayed.")
+                    logger.warning(f"Metrics data not available for solution ID {solution_id}.")
 
-        # --- Export All Generated Plots ---
-        if export_location is not None:
-             if figures:
-                 logger.info(f"Exporting {len(figures)} plots to {export_location}")
-                 self.export_plots_fig(export_location, figures) # Pass the full figures dict
-             else:
-                  logger.warning("No figures were generated to export.")
+                # Find the criteria keys associated with this solution_id
+                criteria_keys = sorted([k for k, v in target_solutions.items() if v == solution_id]) # Sort for consistent naming
+                criteria_str = '_'.join(criteria_keys)
+
+                for plot_name, plot_func in plot_funcs_solution.items():
+                    full_name = f"({criteria_str})__{plot_name}_{solution_id}"
+                    try:
+                        fig = plot_func(solution_id=solution_id, metrics=solution_metrics)
+                        process_figure(fig, full_name, is_solution_plot=True, sol_id=solution_id)
+                    except Exception as e:
+                         logger.error(f"Error generating plot '{full_name}' for solution {solution_id}: {e}", exc_info=True)
+
+
+        # --- Display Collected Plots ---
+        if display_plots:
+            if figures_to_display:
+                logger.info(f"Displaying {len(figures_to_display)} plots for criteria '{display_criteria}'" + (f" (Solution ID: {display_sol_id})" if display_sol_id else ""))
+                try:
+                    # Assuming self.display_plots() handles showing the figures
+                    self.display_plots(figures_to_display)
+                except Exception as e:
+                    logger.error(f"Error during plot display: {e}", exc_info=True)
+                finally:
+                    # Ensure all displayed figures are closed afterwards
+                    for key, fig in figures_to_display.items():
+                        try:
+                            plt.close(fig)
+                        except Exception as e:
+                            logger.warning(f"Error closing displayed plot '{key}': {e}")
+                    figures_to_display.clear() # Clear the dictionary
+            else:
+                logger.warning(f"No plots were collected to display for criteria '{display_criteria}'.")
+
+        logger.info("Finished plot generation and processing.")
