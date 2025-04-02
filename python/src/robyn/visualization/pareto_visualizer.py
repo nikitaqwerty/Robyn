@@ -1452,11 +1452,7 @@ class ParetoVisualizer(BaseVisualizer):
         }
 
         for key, (metric, ascending) in criteria_metrics.items():
-            # Try finding in cleaned results first, fallback to all results if needed/available
             best_id = get_best_sol_id(cleaned_results_df, metric, ascending)
-            # Optional: Fallback to all_results_df if not found in cleaned? Depends on desired behavior.
-            # if best_id is None and all_results_df is not None:
-            #     best_id = get_best_sol_id(all_results_df, metric, ascending)
             target_solutions[key] = best_id
             logger.info(f"Identified solution for {key}: {target_solutions[key]}")
 
