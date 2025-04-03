@@ -55,6 +55,8 @@ class RidgeModelEvaluator:
         trial: int,
         seed: int,
         total_trials: int,
+        val_size: int = 5,  # New parameter for fixed validation size
+        test_size: int = 5,  # New parameter for fixed test size
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -150,6 +152,8 @@ class RidgeModelEvaluator:
                         trial=trial,
                         intercept_sign=intercept_sign,
                         intercept=intercept,
+                        val_size=val_size,  # Pass the new parameter
+                        test_size=test_size,  # Pass the new parameter
                     )
 
                 self.logger.debug(
@@ -302,6 +306,8 @@ class RidgeModelEvaluator:
         trial: int,
         intercept_sign: str,
         intercept: bool,
+        val_size: int = 5,  # New parameter for fixed validation size
+        test_size: int = 5,  # New parameter for fixed test size
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set"""
         # Get transformed data
@@ -324,22 +330,38 @@ class RidgeModelEvaluator:
         if dt_modSaturated.isna().any().any():
             nan_cols = dt_modSaturated.columns[dt_modSaturated.isna().any()].tolist()
             self.logger.debug(f"Columns with NaN in dt_modSaturated: {nan_cols}")
-        # Continue with existing evaluation logic...
+
         sol_id = f"{trial}_{iter_ng + 1}_1"
 
-        # Split data using R's approach
+        # Modified data splitting logic with fixed validation and test sizes
         train_size = params.get("train_size", 1.0) if ts_validation else 1.0
-        train_idx = int(np.floor(np.quantile(range(len(X)), train_size)))
-        val_test_size = int(np.floor((len(X) * (1 - train_size)) / 2))
+
+        # Calculate total available training data
+        total_train_size = len(X) - val_size - test_size
 
         metrics = {}
         if ts_validation:
-            X_train = X.iloc[:train_idx]
-            y_train = y.iloc[:train_idx]
-            X_val = X.iloc[train_idx : train_idx + val_test_size]
-            y_val = y.iloc[train_idx : train_idx + val_test_size]
-            X_test = X.iloc[train_idx + val_test_size :]
-            y_test = y.iloc[train_idx + val_test_size :]
+            if train_size < 1.0:
+                # Calculate how many rows to use for training
+                used_train_size = int(np.floor(total_train_size * train_size))
+                # Start from (total_train_size - used_train_size) to use only the last portion
+                start_idx = total_train_size - used_train_size
+                X_train = X.iloc[start_idx:total_train_size]
+                y_train = y.iloc[start_idx:total_train_size]
+            else:
+                # If train_size = 1.0, use all available training data
+                X_train = X.iloc[:total_train_size]
+                y_train = y.iloc[:total_train_size]
+
+            # Fixed validation and test sets
+            X_val = X.iloc[total_train_size : total_train_size + val_size]
+            y_val = y.iloc[total_train_size : total_train_size + val_size]
+            X_test = X.iloc[
+                total_train_size + val_size : total_train_size + val_size + test_size
+            ]
+            y_test = y.iloc[
+                total_train_size + val_size : total_train_size + val_size + test_size
+            ]
         else:
             X_train, y_train = X, y
             X_val = X_test = y_val = y_test = None
@@ -359,17 +381,19 @@ class RidgeModelEvaluator:
                         },
                         "split_params": {
                             "train_size": train_size,
-                            "val_size": (1 - train_size) / 2 if ts_validation else None,
-                            "test_size": (
-                                (1 - train_size) / 2 if ts_validation else None
-                            ),
+                            "val_size": val_size,
+                            "test_size": test_size,
                         },
                         "split_indices": {
-                            "train_end": train_idx,
-                            "val_end": (
-                                train_idx + val_test_size if ts_validation else None
+                            "train_start": (
+                                0
+                                if train_size == 1.0
+                                else total_train_size
+                                - int(np.floor(total_train_size * train_size))
                             ),
-                            "test_end": len(X) if ts_validation else None,
+                            "train_end": total_train_size,
+                            "val_end": total_train_size + val_size,
+                            "test_end": total_train_size + val_size + test_size,
                         },
                         "split_shapes": {
                             "x_train": X_train.shape,
@@ -572,6 +596,9 @@ class RidgeModelEvaluator:
 
         # Calculate metrics using R-style calculations
         y_train_pred = model.predict(x_norm)
+        full_dataset_predictions = model.predict(
+            X
+        )  # X is the full dataset with 139 rows
 
         # Log prediction stats
         self.logger.debug(
@@ -736,7 +763,7 @@ class RidgeModelEvaluator:
         # Now use the concatenated predictions for decomposition
         decomp_results = self.ridge_metrics_calculator.model_decomp(
             model=model,
-            y_pred=y_pred,  # Use concatenated predictions here
+            y_pred=full_dataset_predictions,  # Use concatenated predictions here
             dt_modSaturated=dt_modSaturated,
             dt_saturatedImmediate=transformed_data["dt_saturatedImmediate"],
             dt_saturatedCarryover=transformed_data["dt_saturatedCarryover"],

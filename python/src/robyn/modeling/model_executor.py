@@ -46,6 +46,8 @@ class ModelExecutor(BaseModelExecutor):
         outputs: bool = False,
         model_name: Models = Models.RIDGE,
         lambda_control: Optional[float] = None,
+        val_size: int = 5,  # New parameter for fixed validation size
+        test_size: int = 5,  # New parameter for fixed test size
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -97,6 +99,8 @@ class ModelExecutor(BaseModelExecutor):
                     intercept=intercept,
                     intercept_sign=intercept_sign,
                     cores=cores,
+                    val_size=val_size,
+                    test_size=test_size,
                 )
                 self.logger.info("Model building completed successfully")
 

@@ -158,6 +158,8 @@ class RidgeModelBuilder:
         intercept: bool = True,
         intercept_sign: str = "non_negative",
         cores: Optional[int] = None,
+        val_size: int = 5,  # New parameter for fixed validation size
+        test_size: int = 5,  # New parameter for fixed test size
     ) -> ModelOutputs:
         start_time = time.time()
         # Initialize hyperparameters with flattened structure
@@ -198,6 +200,8 @@ class RidgeModelBuilder:
                 trial=trial,
                 seed=seed[0] + trial,
                 total_trials=trials_config.trials,
+                val_size=val_size,  # New parameter for fixed validation size
+                test_size=test_size,  # New parameter for fixed test size
             )
             trials.append(trial_result)
 
