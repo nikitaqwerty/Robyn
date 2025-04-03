@@ -671,21 +671,30 @@ class RidgeModelEvaluator:
             metrics["nrmse_test"] = self.ridge_metrics_calculator.calculate_nrmse(
                 y_test, y_test_pred
             )
-            metrics["nrmse"] = metrics["nrmse_val"]
 
-            # Calculate MAE on the combined validation and test sets
+            # Calculate NRMSE on combined validation and test sets
             y_val_test = np.concatenate([y_val, y_test])
             y_val_test_pred = np.concatenate([y_val_pred, y_test_pred])
+            metrics["nrmse_val_test"] = self.ridge_metrics_calculator.calculate_nrmse(
+                y_val_test, y_val_test_pred
+            )
+
+            # Use the combined NRMSE instead of just validation NRMSE
+            metrics["nrmse"] = metrics["nrmse_val_test"]
+
+            # Calculate MAE on the combined validation and test sets
             metrics["mae"] = np.mean(np.abs(y_val_test - y_val_test_pred))
 
-            # Log MAE calculation
+            # Log the combined NRMSE calculation
             self.logger.debug(
                 json.dumps(
                     {
-                        "step": "step11b_model_metrics_mae",
+                        "step": "step11b_model_metrics_combined",
                         "data": {
-                            "mae": {
-                                "value": float(metrics["mae"]),
+                            "nrmse": {
+                                "val_only": float(metrics["nrmse_val"]),
+                                "test_only": float(metrics["nrmse_test"]),
+                                "combined": float(metrics["nrmse_val_test"]),
                                 "y_val_test_length": len(y_val_test),
                                 "y_val_test_pred_length": len(y_val_test_pred),
                             }
