@@ -345,11 +345,17 @@ class ParetoVisualizer(BaseVisualizer):
         solution_id: str,
         ax: Optional[plt.Axes] = None,
         metrics: Optional[Dict[str, float]] = None,
+        test_rows: int = 5,
+        val_rows: int = 5,  # New parameter for validation rows
     ) -> Optional[plt.Figure]:
         """Generate time series plot comparing fitted vs actual values.
 
         Args:
+            solution_id: ID of the solution to visualize
             ax: Optional matplotlib axes to plot on. If None, creates new figure
+            metrics: Optional dictionary containing model performance metrics
+            test_rows: Number of last rows to use for testing (if 0, uses train_size from model)
+            val_rows: Number of rows to use for validation before test rows (if 0, uses train_size from model)
 
         Returns:
             Optional[plt.Figure]: Generated matplotlib Figure object
@@ -401,7 +407,7 @@ class ParetoVisualizer(BaseVisualizer):
         if not train_size_series.empty:
             train_size = float(train_size_series.iloc[0])
         else:
-            train_size = 0
+            train_size = 0.7  # Default train size if not available
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(20, 10))
@@ -433,53 +439,88 @@ class ParetoVisualizer(BaseVisualizer):
         y_min, y_max = ax.get_ylim()
         ax.set_ylim(y_min, y_max * 1.2)  # Add 20% padding at the top
 
-        # Add training/validation/test splits if train_size exists and is valid
-        if train_size > 0:
-            try:
-                # Get unique sorted dates, excluding NaT
-                unique_dates = sorted(ts_data["ds"].dropna().unique())
-                total_days = len(unique_dates)
+        # Add training/validation/test splits
+        try:
+            # Get unique sorted dates, excluding NaT
+            unique_dates = sorted(ts_data["ds"].dropna().unique())
+            total_days = len(unique_dates)
 
-                if total_days > 0:
-                    # Calculate split points
-                    train_cut = int(total_days * train_size)
-                    val_cut = train_cut + int(total_days * (1 - train_size) / 2)
+            if total_days > 0:
+                # Handle split calculations based on test_rows and val_rows parameters
+                if test_rows > 0 and test_rows < total_days:
+                    # Use specified test_rows
+                    test_start_idx = total_days - test_rows
 
-                    # Get dates for splits
+                    # Determine validation size based on val_rows parameter
+                    if val_rows > 0 and val_rows < (total_days - test_rows):
+                        val_start_idx = test_start_idx - val_rows
+                    else:
+                        # Default: equal to test size or remaining space
+                        val_rows = min(test_rows, test_start_idx)
+                        val_start_idx = test_start_idx - val_rows
+
+                    # Calculate actual percentages for display
+                    test_pct = test_rows / total_days
+                    val_pct = val_rows / total_days
+                    train_pct = 1 - (test_pct + val_pct)
+
+                    # Define splits as starting points of each section
                     splits = [
-                        (train_cut, "Train", train_size),
-                        (val_cut, "Validation", (1 - train_size) / 2),
-                        (total_days - 1, "Test", (1 - train_size) / 2),
+                        ("Train", 0, train_pct),
+                        ("Validation", val_start_idx, val_pct),
+                        ("Test", test_start_idx, test_pct),
+                    ]
+                else:
+                    # Use train_size from model
+                    # Calculate split points using percentages
+                    train_cut = int(total_days * train_size)
+
+                    # Calculate remaining portion
+                    remaining = 1 - train_size
+
+                    # Split remaining portion between val and test
+                    val_portion = remaining / 2  # Equal split
+                    test_portion = remaining - val_portion
+
+                    val_cut = train_cut + int(total_days * val_portion)
+
+                    # Define splits as starting points of each section
+                    splits = [
+                        ("Train", 0, train_size),
+                        ("Validation", train_cut, val_portion),
+                        ("Test", val_cut, test_portion),
                     ]
 
-                    # Get y-axis limits for text placement
-                    y_min, y_max = ax.get_ylim()
+                # Get y-axis limits for text placement
+                y_min, y_max = ax.get_ylim()
 
-                    # Add vertical lines and labels
-                    for idx, label, size in splits:
-                        if 0 <= idx < len(unique_dates):  # Ensure index is valid
-                            date = unique_dates[idx]
-                            if pd.notna(date):  # Check if date is valid
-                                # Add vertical line - extend beyond the top of the plot
-                                ax.axvline(
-                                    date, color="#39638b", alpha=0.8, ymin=0, ymax=1.1
-                                )
+                # Add vertical lines and labels for each split
+                for i, (label, idx, size) in enumerate(splits):
+                    if i == 0:  # Skip the first split (beginning of Train)
+                        continue
 
-                                # Add rotated text label
-                                ax.text(
-                                    date,
-                                    y_max,
-                                    f"{label}: {size*100:.1f}%",
-                                    rotation=270,
-                                    color="#39638b",
-                                    alpha=0.5,
-                                    size=9,
-                                    ha="left",
-                                    va="top",
-                                )
-            except Exception as e:
-                logger.warning(f"Error adding split lines: {str(e)}")
-                # Continue with the rest of the plot even if split lines fail
+                    if 0 <= idx < len(unique_dates):  # Ensure index is valid
+                        date = unique_dates[idx]
+                        if pd.notna(date):  # Check if date is valid
+                            # Add vertical line
+                            ax.axvline(date, color="#39638b", alpha=0.8, linestyle="--")
+
+                            # Add rotated text label with percentage
+                            ax.text(
+                                date,
+                                y_max * 0.95,  # Position slightly below the top
+                                f"{label}: {size*100:.1f}%",
+                                rotation=270,
+                                color="#39638b",
+                                fontweight="bold",
+                                size=10,
+                                ha="right",
+                                va="top",
+                                bbox=dict(facecolor="white", alpha=0.7, pad=2),
+                            )
+        except Exception as e:
+            logger.warning(f"Error adding split lines: {str(e)}")
+            # Continue with the rest of the plot even if split lines fail
 
         # Set title and labels
         ax.set_title("Actual vs. Predicted Response", pad=20)
@@ -493,7 +534,7 @@ class ParetoVisualizer(BaseVisualizer):
             ncol=2,  # Two columns side by side
             borderaxespad=0,
             frameon=False,
-            fontsize=7,
+            fontsize=9,
             handlelength=2,  # Length of the legend lines
             handletextpad=0.5,  # Space between line and text
             columnspacing=1.0,  # Space between columns

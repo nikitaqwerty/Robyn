@@ -168,36 +168,44 @@ class FeatureEngineering:
         self.logger.debug("Creating rolling window data")
         window_start = self.mmm_data.mmmdata_spec.window_start
         window_end = self.mmm_data.mmmdata_spec.window_end
+        rw_start = self.mmm_data.mmmdata_spec.rolling_window_start_which
+        rw_end = self.mmm_data.mmmdata_spec.rolling_window_end_which
 
         try:
-            if window_start is None and window_end is None:
-                self.logger.debug("No window constraints specified")
-                return dt_transform
-            elif window_start is None:
-                if window_end < dt_transform["ds"].min():
-                    self.logger.error("Window end date is before the start of data")
-                    raise ValueError("window_end is before the start of the data")
-                self.logger.debug(f"Filtering data up to {window_end}")
-                return dt_transform[dt_transform["ds"] <= window_end]
-            elif window_end is None:
-                if window_start > dt_transform["ds"].max():
-                    self.logger.error("Window start date is after the end of data")
-                    raise ValueError("window_start is after the end of the data")
-                self.logger.debug(f"Filtering data from {window_start}")
-                return dt_transform[dt_transform["ds"] >= window_start]
-            else:
-                if window_start > window_end:
-                    self.logger.error(
-                        f"Invalid window range: {window_start} to {window_end}"
-                    )
-                    raise ValueError("window_start is after window_end")
-                self.logger.debug(
-                    f"Filtering data between {window_start} and {window_end}"
+            # Check if window parameters are valid
+            if rw_start is None or rw_end is None:
+                self.logger.warning(
+                    "Rolling window start or end index not found. Using full data."
                 )
-                return dt_transform[
-                    (dt_transform["ds"] >= window_start)
-                    & (dt_transform["ds"] <= window_end)
-                ]
+                if window_start is None and window_end is None:
+                    self.logger.debug("No date window constraints specified")
+                    return dt_transform
+                elif window_start is None:
+                    self.logger.debug(f"Filtering data up to {window_end}")
+                    return dt_transform[dt_transform["ds"] <= window_end]
+                elif window_end is None:
+                    self.logger.debug(f"Filtering data from {window_start}")
+                    return dt_transform[dt_transform["ds"] >= window_start]
+                else:
+                    self.logger.debug(
+                        f"Filtering data between {window_start} and {window_end}"
+                    )
+                    return dt_transform[
+                        (dt_transform["ds"] >= window_start)
+                        & (dt_transform["ds"] <= window_end)
+                    ]
+            elif rw_start < 0 or rw_end >= len(dt_transform) or rw_start > rw_end:
+                self.logger.error(
+                    f"Invalid rolling window indices: start={rw_start}, end={rw_end}, data_len={len(dt_transform)}"
+                )
+                raise ValueError("Invalid rolling window indices")
+            else:
+                # Use integer-based slicing for consistency
+                self.logger.debug(
+                    f"Slicing data using indices from {rw_start} to {rw_end} (inclusive)"
+                )
+                return dt_transform.iloc[rw_start : rw_end + 1]
+
         except Exception as e:
             self.logger.error(f"Error creating rolling window data: {str(e)}")
             raise

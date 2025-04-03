@@ -450,7 +450,7 @@ class PlotDataGenerator:
         )
         dt_transformSpendMod = dt_transformPlot.iloc[rw_start_loc:rw_end_loc]
         dt_transformAdstock = dt_transformPlot.copy()
-        self.dt_transformSaturation = dt_transformPlot.iloc[rw_start_loc:rw_end_loc]
+        self.dt_transformSaturation = dt_transformPlot.iloc[rw_start_loc : rw_end_loc + 1]
 
         all_media_channels = self.mmm_data.mmmdata_spec.all_media
         for med in range(len(all_media_channels)):
@@ -471,7 +471,7 @@ class PlotDataGenerator:
             x_list = self.transformer.transform_adstock(m, adstock, channelHyperparam)
             m_adstocked = x_list.x_decayed
             dt_transformAdstock[med_select] = m_adstocked
-            m_adstockedRollWind = m_adstocked[rw_start_loc:rw_end_loc]
+            m_adstockedRollWind = m_adstocked[rw_start_loc : rw_end_loc + 1]
 
             # Saturation
             alpha = self.hypParam[f"{all_media_channels[med]}_alphas"].iloc[0]
