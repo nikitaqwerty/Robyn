@@ -182,7 +182,7 @@ class AllocatorDataPreparation:
         """Setup date ranges and windows for optimization."""
         window_loc = slice(
             self.mmm_data.mmmdata_spec.rolling_window_start_which,
-            self.mmm_data.mmmdata_spec.rolling_window_end_which,
+            self.mmm_data.mmmdata_spec.rolling_window_end_which + 1,
         )
         self.dt_optim_cost = self.mmm_data.data.iloc[window_loc]
 

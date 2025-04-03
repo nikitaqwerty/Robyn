@@ -54,3 +54,4 @@ python/src/robyn/_deprecate/*
 python/src/robyn/tutorials/output/*
 python/src/robyn/debug/*
 *.pyc
+.vscode/launch.json
