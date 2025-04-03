@@ -264,7 +264,7 @@ class PlotDataGenerator:
         )
 
         xDecompVec["intercept"] = intercept
-        xDecompVec["depVarHat"] = xDecompVec.sum(axis=1) + intercept
+        xDecompVec["depVarHat"] = xDecompVec.sum(axis=1)
         xDecompVec["sol_id"] = sid
 
         xDecompVec = pd.concat(
@@ -450,7 +450,9 @@ class PlotDataGenerator:
         )
         dt_transformSpendMod = dt_transformPlot.iloc[rw_start_loc:rw_end_loc]
         dt_transformAdstock = dt_transformPlot.copy()
-        self.dt_transformSaturation = dt_transformPlot.iloc[rw_start_loc : rw_end_loc + 1]
+        self.dt_transformSaturation = dt_transformPlot.iloc[
+            rw_start_loc : rw_end_loc + 1
+        ]
 
         all_media_channels = self.mmm_data.mmmdata_spec.all_media
         for med in range(len(all_media_channels)):
