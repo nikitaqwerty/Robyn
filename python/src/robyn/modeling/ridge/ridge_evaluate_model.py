@@ -199,6 +199,9 @@ class RidgeModelEvaluator:
                     self.logger.debug(
                         f"Iteration {iter_ng+1} results - NRMSE: {result['nrmse']:.6f}, RSSD: {result.get('decomp_rssd', 0):.6f}, Loss: {result['loss']:.6f}"
                     )
+                    # Add MAE to debug log if available
+                    if "mae" in result:
+                        self.logger.debug(f"MAE: {result['mae']:.6f}")
 
         end_time = time.time()
         self.logger.info(f" Finished in {(end_time - start_time) / 60:.2f} mins")
@@ -223,6 +226,10 @@ class RidgeModelEvaluator:
             }
         )
 
+        # Add the MAE metric to the hyper_param DataFrame
+        if "mae" in all_results[0]:
+            result_hyp_param["mae"] = [float(r["mae"]) for r in all_results]
+
         decomp_spend_dist = pd.concat(
             [r["decomp_spend_dist"] for r in all_results], ignore_index=True
         )
@@ -245,9 +252,17 @@ class RidgeModelEvaluator:
             self.logger.debug(
                 f"Best observed loss: {optimizer.current_bests['pessimistic'].mean}"
             )
-        self.logger.debug(
-            f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}"
-        )
+
+        # Log MAE in debug output but don't try to add it to the Trial constructor
+        if "mae" in best_result:
+            self.logger.debug(
+                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}, MAE={best_result['mae']:.6f}"
+            )
+        else:
+            self.logger.debug(
+                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}"
+            )
+
         return Trial(
             result_hyp_param=result_hyp_param,
             lift_calibration=best_result.get("lift_calibration", pd.DataFrame()),
@@ -630,11 +645,34 @@ class RidgeModelEvaluator:
                 y_test, y_test_pred
             )
             metrics["nrmse"] = metrics["nrmse_val"]
+
+            # Calculate MAE on the combined validation and test sets
+            y_val_test = np.concatenate([y_val, y_test])
+            y_val_test_pred = np.concatenate([y_val_pred, y_test_pred])
+            metrics["mae"] = np.mean(np.abs(y_val_test - y_val_test_pred))
+
+            # Log MAE calculation
+            self.logger.debug(
+                json.dumps(
+                    {
+                        "step": "step11b_model_metrics_mae",
+                        "data": {
+                            "mae": {
+                                "value": float(metrics["mae"]),
+                                "y_val_test_length": len(y_val_test),
+                                "y_val_test_pred_length": len(y_val_test_pred),
+                            }
+                        },
+                    },
+                    indent=2,
+                )
+            )
         else:
             y_pred = y_train_pred  # If no validation, just use training predictions
             metrics["rsq_val"] = metrics["rsq_test"] = 0.0
             metrics["nrmse_val"] = metrics["nrmse_test"] = 0.0
             metrics["nrmse"] = metrics["nrmse_train"]
+            metrics["mae"] = 0.0  # Default value when no validation/test set
 
         # Log ridge regression results
         self.logger.debug(
@@ -648,6 +686,7 @@ class RidgeModelEvaluator:
                         "nrmse_train": metrics["nrmse_train"],
                         "nrmse_val": metrics["nrmse_val"],
                         "nrmse_test": metrics["nrmse_test"],
+                        "mae": metrics["mae"],  # Add MAE to logged metrics
                         "coefs": list(model.get_full_coefficients()),
                         "df_int": model.df_int,
                     },
@@ -939,6 +978,10 @@ class RidgeModelEvaluator:
             }
         )
 
+        # Add MAE to decomp_spend_dist if available
+        if "mae" in metrics:
+            decomp_spend_dist["mae"] = metrics["mae"]
+
         # Ensure correct column order
         required_cols = [
             "rn",
@@ -966,44 +1009,52 @@ class RidgeModelEvaluator:
             "Elapsed",
             "pos",
         ]
+        # Add MAE to required columns if available
+        if "mae" in decomp_spend_dist.columns:
+            required_cols.insert(required_cols.index("decomp_rssd"), "mae")
+
         decomp_spend_dist = decomp_spend_dist[required_cols]
 
         # Format x_decomp_agg with all required columns and metrics
-        x_decomp_agg = pd.DataFrame(
-            {
-                "rn": x_decomp_agg["rn"],
-                "coef": x_decomp_agg["coef"],
-                "xDecompAgg": x_decomp_agg["xDecompAgg"],
-                "xDecompPerc": x_decomp_agg["xDecompPerc"],
-                "xDecompMeanNon0": x_decomp_agg["xDecompMeanNon0"],
-                "xDecompMeanNon0Perc": x_decomp_agg["xDecompMeanNon0Perc"],
-                "xDecompAggRF": x_decomp_agg["xDecompAggRF"],
-                "xDecompPercRF": x_decomp_agg["xDecompPercRF"],
-                "xDecompMeanNon0RF": x_decomp_agg["xDecompMeanNon0RF"],
-                "xDecompMeanNon0PercRF": x_decomp_agg["xDecompMeanNon0PercRF"],
-                "pos": x_decomp_agg["pos"],
-                # Add all metrics
-                "train_size": float(metrics.get("train_size", 1.0)),
-                "rsq_train": float(metrics.get("rsq_train", 0)),
-                "rsq_val": float(metrics.get("rsq_val", 0)),
-                "rsq_test": float(metrics.get("rsq_test", 0)),
-                "nrmse_train": float(metrics.get("nrmse_train", 0)),
-                "nrmse_val": float(metrics.get("nrmse_val", 0)),
-                "nrmse_test": float(metrics.get("nrmse_test", 0)),
-                "nrmse": float(metrics.get("nrmse", 0)),
-                "decomp.rssd": float(metrics.get("decomp_rssd", 0)),
-                "mape": float(metrics.get("mape", 0)),
-                "lambda": float(metrics.get("lambda", 0)),
-                "lambda_hp": float(metrics.get("lambda_hp", 0)),
-                "lambda_max": float(metrics.get("lambda_max", 0)),
-                "lambda_min_ratio": float(metrics.get("lambda_min_ratio", 0)),
-                "sol_id": str(metrics.get("sol_id", "")),
-                "trial": int(metrics.get("trial", 0)),
-                "iterNG": int(metrics.get("iterNG", 0)),
-                "iterPar": int(metrics.get("iterPar", 0)),
-                "Elapsed": float(metrics.get("Elapsed", 0)),
-            }
-        )
+        x_decomp_agg_data = {
+            "rn": x_decomp_agg["rn"],
+            "coef": x_decomp_agg["coef"],
+            "xDecompAgg": x_decomp_agg["xDecompAgg"],
+            "xDecompPerc": x_decomp_agg["xDecompPerc"],
+            "xDecompMeanNon0": x_decomp_agg["xDecompMeanNon0"],
+            "xDecompMeanNon0Perc": x_decomp_agg["xDecompMeanNon0Perc"],
+            "xDecompAggRF": x_decomp_agg["xDecompAggRF"],
+            "xDecompPercRF": x_decomp_agg["xDecompPercRF"],
+            "xDecompMeanNon0RF": x_decomp_agg["xDecompMeanNon0RF"],
+            "xDecompMeanNon0PercRF": x_decomp_agg["xDecompMeanNon0PercRF"],
+            "pos": x_decomp_agg["pos"],
+            # Add all metrics
+            "train_size": float(metrics.get("train_size", 1.0)),
+            "rsq_train": float(metrics.get("rsq_train", 0)),
+            "rsq_val": float(metrics.get("rsq_val", 0)),
+            "rsq_test": float(metrics.get("rsq_test", 0)),
+            "nrmse_train": float(metrics.get("nrmse_train", 0)),
+            "nrmse_val": float(metrics.get("nrmse_val", 0)),
+            "nrmse_test": float(metrics.get("nrmse_test", 0)),
+            "nrmse": float(metrics.get("nrmse", 0)),
+            "decomp.rssd": float(metrics.get("decomp_rssd", 0)),
+            "mape": float(metrics.get("mape", 0)),
+            "lambda": float(metrics.get("lambda", 0)),
+            "lambda_hp": float(metrics.get("lambda_hp", 0)),
+            "lambda_max": float(metrics.get("lambda_max", 0)),
+            "lambda_min_ratio": float(metrics.get("lambda_min_ratio", 0)),
+            "sol_id": str(metrics.get("sol_id", "")),
+            "trial": int(metrics.get("trial", 0)),
+            "iterNG": int(metrics.get("iterNG", 0)),
+            "iterPar": int(metrics.get("iterPar", 0)),
+            "Elapsed": float(metrics.get("Elapsed", 0)),
+        }
+
+        # Add MAE to x_decomp_agg if available
+        if "mae" in metrics:
+            x_decomp_agg_data["mae"] = float(metrics["mae"])
+
+        x_decomp_agg = pd.DataFrame(x_decomp_agg_data)
 
         # Ensure correct column order
         required_cols = [
@@ -1038,7 +1089,13 @@ class RidgeModelEvaluator:
             "iterPar",
             "Elapsed",
         ]
+
+        # Add MAE to required columns if available
+        if "mae" in x_decomp_agg.columns:
+            required_cols.insert(required_cols.index("decomp.rssd"), "mae")
+
         x_decomp_agg = x_decomp_agg[required_cols]
+
         return {
             "loss": loss,
             "params": params_formatted,
