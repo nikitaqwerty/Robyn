@@ -128,6 +128,7 @@ from robyn.modeling.model_executor import ModelExecutor
 
 iterations = 10
 trials = 1
+TEST_VAL_ROWS = 10
 logger.info(f"Configuring with {iterations} iterations and {trials} trials")
 
 trials_config = TrialsConfig(iterations=iterations, trials=trials)
@@ -154,8 +155,8 @@ output_models = model_executor.model_run(
     model_name=Models.RIDGE,
     cores=16,
     seed=[42],
-    val_size=5,
-    test_size=5,
+    val_size=TEST_VAL_ROWS // 2,
+    test_size=TEST_VAL_ROWS // 2,
 )
 logger.info("Model execution completed successfully")
 
@@ -183,8 +184,8 @@ best_mae_row = (
     .iloc[0]
 )
 best_mae_model = best_mae_row.sol_id
-MAE_val = best_mae_row.mae
-logger.info(f"Best model ID: {best_mae_model} with MAE: {MAE_val:.4f}")
+MAE_test_val = best_mae_row.mae
+logger.info(f"Best model ID: {best_mae_model} with MAE: {MAE_test_val:.4f}")
 
 # Get plot data and calculate metrics
 logger.info("Extracting time series data for evaluation...")
@@ -197,16 +198,18 @@ wide_df = ts_data.pivot(index="ds", columns="variable", values="value").reset_in
 wide_df.columns.name = None
 wide_df = wide_df.sort_values("ds")
 
-# Analyze last 10 rows
-last_10 = wide_df.tail(10)
+# Analyze last rows (test + val )
+last_rows = wide_df.tail(TEST_VAL_ROWS)
 logger.info("\nAnalyzing last 10 rows of data:")
-logger.info(f"\n{last_10}")
+logger.info(f"\n{last_rows}")
 
 # Calculate additional metrics for evaluation
 metrics = {}
-MAE_plot_data = mean_absolute_error(last_10["actual"], last_10["predicted"])
-RMSE_plot_data = np.sqrt(mean_squared_error(last_10["actual"], last_10["predicted"]))
-r2_plot_data = r2_score(last_10["actual"], last_10["predicted"])
+MAE_plot_data = mean_absolute_error(last_rows["actual"], last_rows["predicted"])
+RMSE_plot_data = np.sqrt(
+    mean_squared_error(last_rows["actual"], last_rows["predicted"])
+)
+r2_plot_data = r2_score(last_rows["actual"], last_rows["predicted"])
 
 logger.info(f"Calculated MAE from plot data: {MAE_plot_data:.4f}")
 logger.info(f"Calculated RMSE from plot data: {RMSE_plot_data:.4f}")
@@ -214,17 +217,17 @@ logger.info(f"Calculated R-squared from plot data: {r2_plot_data:.4f}")
 
 # Validate MAE consistency with detailed logging
 rtol = 0.05  # Relative tolerance (5%)
-abs_diff = abs(MAE_plot_data - MAE_val)
-rel_diff = abs_diff / MAE_val * 100 if MAE_val != 0 else float("inf")
+abs_diff = abs(MAE_plot_data - MAE_test_val)
+rel_diff = abs_diff / MAE_test_val * 100 if MAE_test_val != 0 else float("inf")
 
 logger.info(f"Validating MAE consistency...")
-logger.info(f"Model MAE: {MAE_val:.4f}")
+logger.info(f"Model MAE: {MAE_test_val:.4f}")
 logger.info(f"Plot data MAE: {MAE_plot_data:.4f}")
 logger.info(f"Absolute difference: {abs_diff:.4f}")
 logger.info(f"Relative difference: {rel_diff:.2f}%")
 logger.info(f"Relative tolerance: {rtol*100:.1f}%")
 
-is_close = np.isclose(MAE_plot_data, MAE_val, rtol=rtol)
+is_close = np.isclose(MAE_plot_data, MAE_test_val, rtol=rtol)
 if is_close:
     logger.info(
         f"✓ MAE validation PASSED: Values are within {rtol*100:.1f}% relative tolerance"
@@ -236,7 +239,7 @@ else:
 
 # Enhanced assertion with detailed error message
 assert is_close, (
-    f"MAE validation failed: calculated MAE ({MAE_plot_data:.4f}) vs model MAE ({MAE_val:.4f}), "
+    f"MAE validation failed: calculated MAE ({MAE_plot_data:.4f}) vs model MAE ({MAE_test_val:.4f}), "
     f"absolute difference: {abs_diff:.4f}, relative difference: {rel_diff:.2f}%, "
     f"exceeding tolerance of {rtol*100:.1f}%"
 )
