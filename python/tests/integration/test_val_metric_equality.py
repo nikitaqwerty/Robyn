@@ -168,14 +168,20 @@ pareto_optimizer = ParetoOptimizer(
 )
 logger.info("Pareto optimizer created")
 
-pareto_result = pareto_optimizer.optimize(pareto_fronts=1, min_candidates=1)
+pareto_result = pareto_optimizer.optimize(pareto_fronts="auto", min_candidates=1)
 logger.info(
     f"Pareto optimization completed with {len(pareto_result.result_hyp_param)} candidates"
 )
 
 # Find best model by MAE
 logger.info("Evaluating best model based on MAE...")
-best_mae_row = pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0]
+best_mae_row = (
+    pareto_result.result_hyp_param[
+        pareto_result.result_hyp_param["robynPareto"] <= pareto_result.pareto_fronts
+    ]
+    .sort_values("mae", ascending=True)
+    .iloc[0]
+)
 best_mae_model = best_mae_row.sol_id
 MAE_val = best_mae_row.mae
 logger.info(f"Best model ID: {best_mae_model} with MAE: {MAE_val:.4f}")
@@ -207,7 +213,7 @@ logger.info(f"Calculated RMSE from plot data: {RMSE_plot_data:.4f}")
 logger.info(f"Calculated R-squared from plot data: {r2_plot_data:.4f}")
 
 # Validate MAE consistency with detailed logging
-rtol = 0.5  # Relative tolerance (50%)
+rtol = 0.05  # Relative tolerance (5%)
 abs_diff = abs(MAE_plot_data - MAE_val)
 rel_diff = abs_diff / MAE_val * 100 if MAE_val != 0 else float("inf")
 
