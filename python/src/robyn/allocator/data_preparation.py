@@ -253,7 +253,6 @@ class AllocatorDataPreparation:
 
         # Pre-calculate adstocked data and inflexion points
         self.adstocked_ranges = {}
-        self.inflexions = {}
         adstocked_data = self.pareto_result.media_vec_collect[
             self.pareto_result.media_vec_collect["type"] == "adstockedMedia"
         ]
@@ -261,10 +260,7 @@ class AllocatorDataPreparation:
         for i, channel in enumerate(self.media_spend_sorted):
             model_data = adstocked_data[channel].values
             x_range = [min(model_data), max(model_data)]
-            gamma = self.hill_params.gammas[i]
-            inflexion = x_range[0] * (1 - gamma) + x_range[1] * gamma
             self.adstocked_ranges[channel] = x_range
-            self.inflexions[channel] = inflexion
         self._setup_date_ranges()
         self._initialize_optimization_params()
 
@@ -346,7 +342,16 @@ class AllocatorDataPreparation:
         alpha = self.hill_params.alphas[channel_index]
         coef = self.hill_params.coefs[channel_index]
         carryover = self.hill_params.carryover[channel_index]
-        inflexion = self.inflexions[channel]
+        
+        # Modified: use the same calculation as in transformations.py
+        # Instead of using pre-calculated inflexion, calculate it directly
+        adstocked_data = self.pareto_result.media_vec_collect[
+            self.pareto_result.media_vec_collect["type"] == "adstockedMedia"
+        ]
+        # Get max value for this channel's adstocked data
+        max_value = adstocked_data[channel].max()
+        gamma = self.hill_params.gammas[channel_index]
+        inflexion = max_value * gamma
 
         # Calculate response
         x_adstocked = spend + carryover

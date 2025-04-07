@@ -331,16 +331,18 @@ class AllocatorPlotter(BaseVisualizer):
                 channel_idx
             ]
 
-            # Get range values
+            # Get channel name
             channel = self.budget_allocator.allocator_data_preparer.media_spend_sorted[
                 channel_idx
             ]
-            x_range = self.budget_allocator.allocator_data_preparer.adstocked_ranges[
-                channel
+            
+            # Calculate inflexion point directly as in data_preparation.py
+            adstocked_data = self.budget_allocator.allocator_data_preparer.pareto_result.media_vec_collect[
+                self.budget_allocator.allocator_data_preparer.pareto_result.media_vec_collect["type"] == "adstockedMedia"
             ]
-            inflexion = self.budget_allocator.allocator_data_preparer.inflexions[
-                channel
-            ]
+            # Get max value for this channel's adstocked data
+            max_value = adstocked_data[channel].max()
+            inflexion = max_value * gamma
 
             # Step 1: Adstock transformation
             x_adstocked = spend_range + carryover
