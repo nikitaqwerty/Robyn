@@ -216,7 +216,7 @@ class Transformation:
             logger.error("Invalid alpha or gamma values: must be scalar")
             raise ValueError("alpha and gamma must be single values")
 
-        inflexion = gamma * x.max() + (1 - gamma) * x.min()
+        inflexion = x.max() * gamma
         logger.debug("Calculated inflexion point: %f", inflexion)
 
         result = (
