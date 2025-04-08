@@ -310,8 +310,15 @@ class AllocatorPlotter(BaseVisualizer):
             logger.error("Failed to create response curves plot: %s", str(e))
             raise
 
-    def _plot_combined_response_curves(self) -> plt.Figure:
-        """Plot response curves for all channels on a single plot for comparison."""
+    def _plot_combined_response_curves(
+        self, max_projection_spend: float = 50000000
+    ) -> plt.Figure:
+        """
+        Plot response curves for all channels on a single plot for comparison.
+
+        Args:
+            max_projection_spend: Maximum spend to project for any channel (default: 50,000,000)
+        """
         if any(
             attr is None
             for attr in [self.dt_optimOut, self.mainPoints, self.budget_allocator]
@@ -333,17 +340,41 @@ class AllocatorPlotter(BaseVisualizer):
 
             # Plot each channel
             for i, channel in enumerate(self.dt_optimOut.channels):
-                # Generate response curve
-                max_spend = np.max(self.mainPoints.spend_points[:, i]) * 1.5
-                spend_range = np.linspace(0, max_spend, 100)
-                response = self._calculate_response_curve_hill(spend_range, i)
+                # Get initial spend for this channel
+                initial_spend = self.dt_optimOut.init_spend_unit[i]
 
-                # Plot main curve for this channel
+                # Calculate projection range up to 3x initial spend or max_projection_spend
+                projection_limit = min(initial_spend * 3, max_projection_spend)
+
+                # Generate historical curve (up to initial spend)
+                historical_spend_range = np.linspace(0, initial_spend, 50)
+                historical_response = self._calculate_response_curve_hill(
+                    historical_spend_range, i
+                )
+
+                # Generate projection curve (from initial spend to projection limit)
+                projection_spend_range = np.linspace(
+                    initial_spend, projection_limit, 50
+                )
+                projection_response = self._calculate_response_curve_hill(
+                    projection_spend_range, i
+                )
+
+                # Plot historical curve (solid line)
                 ax.plot(
-                    spend_range,
-                    response,
+                    historical_spend_range,
+                    historical_response,
                     label=channel,
                     color=channel_colors[i],
+                    alpha=0.7,
+                )
+
+                # Plot projection curve (dotted line) - THIS WAS MISSING
+                ax.plot(
+                    projection_spend_range,
+                    projection_response,
+                    color=channel_colors[i],
+                    linestyle=":",
                     alpha=0.7,
                 )
 
@@ -405,9 +436,37 @@ class AllocatorPlotter(BaseVisualizer):
                 fontsize=9,
             )
 
+            # Add a custom legend entry for projection lines
+            from matplotlib.lines import Line2D
+
+            custom_lines = [Line2D([0], [0], color="black", lw=1.5, linestyle=":")]
+            custom_labels = ["Projection (up to 3x initial spend)"]
+
+            # Create a third legend just for the projection line style
+            ax.legend(
+                custom_lines,
+                custom_labels,
+                loc="lower right",
+                frameon=True,
+                fontsize=9,
+            )
+
+            # Re-add the second legend to ensure it's still visible
+            leg2 = ax.legend(
+                scenario_handles,
+                scenario_labels,
+                loc="upper right",
+                title="Scenarios",
+                frameon=True,
+                fontsize=9,
+            )
+            ax.add_artist(leg1)
+            ax.add_artist(leg2)
+
             # Customize plot
             ax.set_title(
                 f"Comparative Response Curves Across All Channels\n"
+                f"Solid: Historical Data | Dotted: Projections (up to 3x initial spend)\n"
                 f"Spend per {self.interval_type}"
             )
             ax.set_xlabel("Spend")
@@ -558,7 +617,9 @@ class AllocatorPlotter(BaseVisualizer):
                 "budget_opt": self._plot_budget_comparison(),
                 "allocation": self._plot_allocation_matrix(),
                 "response": self._plot_response_curves(),
-                "combined_response": self._plot_combined_response_curves(),  # Add the new plot
+                "combined_response": self._plot_combined_response_curves(
+                    max_projection_spend=50000000
+                ),  # Add the new plot with parameter
             }
 
             if display_plots:
