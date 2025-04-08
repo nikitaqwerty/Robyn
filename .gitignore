@@ -55,4 +55,4 @@ python/src/robyn/tutorials/output/*
 python/src/robyn/debug/*
 *.pyc
 .vscode/launch.json
-python/context.txt
+context.txt
