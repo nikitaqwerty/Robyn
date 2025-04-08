@@ -181,27 +181,33 @@ class ParetoVisualizer(BaseVisualizer):
         ax: Optional[plt.Axes] = None,
         baseline_level: int = 0,
         metrics: Optional[Dict[str, float]] = None,
+        date_range: Optional[List[str]] = None,
     ) -> Optional[plt.Figure]:
-        """Generate waterfall chart for specific solution."""
+        """Generate waterfall chart for specific solution.
 
+        Args:
+            solution_id: ID of the solution to visualize
+            ax: Optional matplotlib axes to plot on. If None, creates new figure
+            baseline_level: Level of baseline variables to include
+            metrics: Optional dictionary containing model performance metrics
+            date_range: Optional list of two elements [start_date, end_date] for filtering data.
+                    If provided, a date-filtered waterfall plot will be generated.
+
+        Returns:
+            Optional[plt.Figure]: Generated matplotlib Figure object
+        """
+        # If date range is provided, use the date-filtered waterfall method
+        if date_range:
+            return self.generate_waterfall_for_date_range(
+                solution_id=solution_id,
+                date_range=date_range,
+                ax=ax,
+                baseline_level=baseline_level,
+                metrics=metrics,
+            )
+
+        # Original waterfall implementation follows...
         logger.debug("Starting generation of waterfall plot")
-        if solution_id not in self.pareto_result.plot_data_collect:
-            # Check if this might be a solution from unfiltered results that wasn't processed
-            if (
-                self.unfiltered_pareto_result
-                and solution_id
-                in self.unfiltered_pareto_result.result_hyp_param["sol_id"].values
-            ):
-                logger.warning(
-                    f"Solution ID {solution_id} found in unfiltered results but not in plot_data_collect. "
-                    "This solution's plot data was not generated. Use ParetoOptimizer.optimize() with the "
-                    "fix that includes best solutions from unfiltered results."
-                )
-            else:
-                logger.warning(
-                    f"Invalid solution ID: {solution_id}. Solution not found in any available data."
-                )
-            return None
 
         # Get data for specific solution
         plot_data = self.pareto_result.plot_data_collect[solution_id]
@@ -327,6 +333,206 @@ class ParetoVisualizer(BaseVisualizer):
         ax.set_axisbelow(True)
 
         logger.debug("Successfully generated waterfall plot")
+        # Adjust layout
+        if fig:
+            plt.subplots_adjust(right=0.85, top=0.85)
+            fig = plt.gcf()
+
+            # Add metrics text using the helper method
+            self._add_metrics_to_plot(fig, metrics, solution_id)
+
+            plt.close(fig)
+            return fig
+
+        return None
+
+    # Add this to ParetoVisualizer class in pareto_visualizer.py
+    def generate_waterfall_for_date_range(
+        self,
+        solution_id: str,
+        date_range: List[str],
+        ax: Optional[plt.Axes] = None,
+        baseline_level: int = 0,
+        metrics: Optional[Dict[str, float]] = None,
+    ) -> Optional[plt.Figure]:
+        """Generate waterfall chart for specific solution and date range.
+
+        This method calculates decomposition for a specific date range and creates
+        a waterfall plot showing the contribution of each variable to the response.
+
+        Args:
+            solution_id: ID of the solution to visualize
+            date_range: List of two elements [start_date, end_date] for filtering data
+            ax: Optional matplotlib axes to plot on. If None, creates new figure
+            baseline_level: Level of baseline variables to include
+            metrics: Optional dictionary containing model performance metrics
+
+        Returns:
+            Optional[plt.Figure]: Generated matplotlib Figure object
+        """
+        logger.debug("Starting generation of date-filtered waterfall plot")
+
+        start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(
+            date_range[1]
+        )
+
+        # Get model coefficients and model data
+        xDecompVec = self.pareto_result.x_decomp_vec_collect[
+            self.pareto_result.x_decomp_vec_collect["sol_id"] == solution_id
+        ]
+
+        # Convert 'ds' to datetime and filter by date range
+        xDecompVec["ds"] = pd.to_datetime(xDecompVec["ds"])
+        date_filtered = xDecompVec[
+            (xDecompVec["ds"] >= start_date) & (xDecompVec["ds"] <= end_date)
+        ]
+
+        if date_filtered.empty:
+            logger.warning(f"No data found for date range {start_date} to {end_date}")
+            return None
+
+        # Get all variables except ds, dep_var, sol_id, and depVarHat
+        var_columns = date_filtered.columns.difference(
+            ["ds", "dep_var", "sol_id", "depVarHat"]
+        )
+
+        # Sum contributions by variable
+        agg_contributions = date_filtered[var_columns].sum()
+        total_response = agg_contributions.sum()
+
+        # Create waterfall data
+        waterfall_data = pd.DataFrame(
+            {
+                "rn": agg_contributions.index,
+                "coef": 1.0,  # Placeholder for coefficient
+                "xDecompAgg": agg_contributions.values,
+                "xDecompPerc": agg_contributions.values / total_response,
+            }
+        )
+
+        # Apply baseline grouping
+        prophet_vars = self.holiday_data.prophet_vars if self.holiday_data else []
+        baseline_vars = self._baseline_vars(baseline_level, prophet_vars)
+
+        # Transform baseline variables
+        waterfall_data["rn"] = np.where(
+            waterfall_data["rn"].isin(baseline_vars),
+            f"Baseline_L{baseline_level}",
+            waterfall_data["rn"],
+        )
+
+        # Group and summarize
+        waterfall_data = (
+            waterfall_data.groupby("rn", as_index=False)
+            .agg({"xDecompAgg": "sum", "xDecompPerc": "sum"})
+            .reset_index(drop=True)
+        )
+
+        # Sort by percentage contribution
+        waterfall_data = waterfall_data.sort_values("xDecompPerc", ascending=True)
+
+        # Calculate waterfall positions
+        waterfall_data["end"] = 1 - waterfall_data["xDecompPerc"].cumsum()
+        waterfall_data["start"] = waterfall_data["end"].shift(1)
+        waterfall_data["start"] = waterfall_data["start"].fillna(1)
+        waterfall_data["sign"] = np.where(
+            waterfall_data["xDecompPerc"] >= 0, "Positive", "Negative"
+        )
+
+        # Create figure if no axes provided
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(12, 8))
+        else:
+            fig = None
+
+        # Define colors
+        colors = {"Positive": "#59B3D2", "Negative": "#E5586E"}
+
+        # Create categorical y-axis positions
+        y_pos = np.arange(len(waterfall_data))
+
+        # Create horizontal bars
+        bars = ax.barh(
+            y=y_pos,
+            width=waterfall_data["start"] - waterfall_data["end"],
+            left=waterfall_data["end"],
+            color=[colors[sign] for sign in waterfall_data["sign"]],
+            height=0.6,
+        )
+
+        # Add text labels
+        for idx, row in enumerate(waterfall_data.itertuples()):
+            # Format label text
+            if abs(row.xDecompAgg) >= 1e9:
+                formatted_num = f"{row.xDecompAgg/1e9:.1f}B"
+            elif abs(row.xDecompAgg) >= 1e6:
+                formatted_num = f"{row.xDecompAgg/1e6:.1f}M"
+            elif abs(row.xDecompAgg) >= 1e3:
+                formatted_num = f"{row.xDecompAgg/1e3:.1f}K"
+            else:
+                formatted_num = f"{row.xDecompAgg:.1f}"
+
+            # Calculate x-position as the middle of the bar
+            x_pos = (row.start + row.end) / 2
+
+            # Use y_pos[idx] to ensure alignment with bars
+            ax.text(
+                x_pos,
+                y_pos[idx],
+                f"{formatted_num}\n{row.xDecompPerc*100:.1f}%",
+                ha="center",
+                va="center",
+                fontsize=9,
+                linespacing=0.9,
+            )
+
+        # Set y-ticks and labels
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(waterfall_data["rn"])
+
+        # Format x-axis as percentage
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: "{:.0%}".format(x)))
+        ax.set_xticks(np.arange(0, 1.1, 0.2))
+
+        # Set plot limits
+        ax.set_xlim(0, 1)
+        ax.set_ylim(-0.5, len(waterfall_data) - 0.5)
+
+        # Add legend at top
+        from matplotlib.patches import Patch
+
+        legend_elements = [
+            Patch(facecolor=colors["Positive"], label="Positive"),
+            Patch(facecolor=colors["Negative"], label="Negative"),
+        ]
+
+        # Create legend with white background
+        legend = ax.legend(
+            handles=legend_elements,
+            title="Sign",
+            loc="upper left",
+            bbox_to_anchor=(0, 1.15),
+            ncol=2,
+            frameon=True,
+            framealpha=1.0,
+        )
+
+        # Set title with date range
+        date_range_str = f" ({date_range[0]} to {date_range[1]})"
+        ax.set_title(
+            f"Response Decomposition Waterfall{date_range_str}", pad=30, x=0.5, y=1.05
+        )
+
+        # Label axes
+        ax.set_xlabel("Contribution")
+        ax.set_ylabel(None)
+
+        # Customize grid
+        ax.grid(True, axis="x", alpha=0.2)
+        ax.set_axisbelow(True)
+
+        logger.debug("Successfully generated date-filtered waterfall plot")
+
         # Adjust layout
         if fig:
             plt.subplots_adjust(right=0.85, top=0.85)
@@ -1230,7 +1436,8 @@ class ParetoVisualizer(BaseVisualizer):
         """
         figures_to_display: Dict[str, plt.Figure] = {}
         figures_to_export: Dict[str, plt.Figure] = {}
-        target_solutions: Dict[str, Optional[str]] = {}  # To store solution IDs based on criteria
+        target_solutions: Dict[str, Optional[str]] = {}
+
         export_path: Optional[Path] = None
 
         if export_location:
@@ -1535,7 +1742,9 @@ class ParetoVisualizer(BaseVisualizer):
         if export_path and figures_to_export:
             try:
                 self.export_plots_fig(export_path, figures_to_export)
-                logger.info(f"Successfully exported {len(figures_to_export)} plots to {export_path}")
+                logger.info(
+                    f"Successfully exported {len(figures_to_export)} plots to {export_path}"
+                )
             except Exception as e:
                 logger.error(f"Error exporting plots: {e}", exc_info=True)
             finally:
