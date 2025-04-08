@@ -12,6 +12,7 @@ import plotly.io as pio
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import copy
 from IPython.display import Image, display
+import shutil
 
 # Robyn imports
 from robyn.robyn import Robyn
@@ -83,7 +84,7 @@ LAMBDA_RANGE = [0, 1]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 10000, "trials": 5}
+TRIALS_CONFIG = {"iterations": 1000, "trials": 2}
 
 MODEL_EXECUTION_PARAMS = {
     "ts_validation": True,
@@ -120,11 +121,22 @@ BUDGET_ALLOCATION_PARAMS = {
 }
 
 
+def clear_output_directory(directory_path):
+    """Clear the contents of the output directory if it exists"""
+    path = Path(directory_path)
+    if path.exists():
+        print(f"Clearing existing output directory: {path}")
+        shutil.rmtree(path)
+
+    # Create fresh directory
+    path.mkdir(parents=True, exist_ok=True)
+    print(f"Created fresh output directory: {path}")
+
+
 def main():
     """Main function executing the entire MMM workflow"""
-    # Set up pandas display options
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.max_rows", 500)
+    # Clear output directory before running
+    clear_output_directory(WORKING_DIR)
 
     # Create data directory if needed
     DATA_PATH.mkdir(parents=True, exist_ok=True)
