@@ -37,10 +37,13 @@ from robyn.visualization.allocator_visualizer import AllocatorPlotter
 
 # ============== HYPERPARAMETERS AND CONFIGURATION ==============
 
+# Base path that will be prepended to DATA_PATH and WORKING_DIR
+BASE_PATH = Path("../../mmm")
+
 # Basic configuration
 VERSION = "0.5.test"
-DATA_PATH = Path(f'data/{".".join(VERSION.split(".")[0:2])}')
-WORKING_DIR = f"output/robyn_output_{VERSION}"
+DATA_PATH = BASE_PATH / f'data/{".".join(VERSION.split(".")[0:2])}'
+WORKING_DIR = BASE_PATH / f"output/robyn_output_{VERSION}"
 START_DATE = "2022-05-01"
 END_DATE = "2025-01-01"
 
@@ -186,7 +189,8 @@ def main():
     mmm_data = MMMData(data=df, mmmdata_spec=mmm_data_spec)
 
     # Load holidays data
-    dt_prophet_holidays = pd.read_csv(f"{DATA_PATH.parent}/dt_prophet_holidays.csv")
+    holidays_file = BASE_PATH / "data/dt_prophet_holidays.csv"
+    dt_prophet_holidays = pd.read_csv(holidays_file)
     holidays_data = HolidaysData(
         dt_holidays=dt_prophet_holidays,
         prophet_vars=["trend", "season", "holiday"],
@@ -212,7 +216,7 @@ def main():
     )
 
     # Initialize Robyn instance
-    robyn = Robyn(working_dir=WORKING_DIR)
+    robyn = Robyn(working_dir=str(WORKING_DIR))
 
     # Feature engineering
     print("Performing feature engineering...")
@@ -375,7 +379,7 @@ def main():
     )
     pareto_visualizer.plot_all(
         display_plots=True,
-        export_location=WORKING_DIR,
+        export_location=str(WORKING_DIR),
         display_criteria="best_mae_test",
     )
 
@@ -386,7 +390,7 @@ def main():
         cluster_results,
         mmm_data,
     )
-    cluster_visualizer.plot_all(display_plots=True, export_location=WORKING_DIR)
+    cluster_visualizer.plot_all(display_plots=True, export_location=str(WORKING_DIR))
 
     # Select model for budget allocation
     select_model = (
@@ -456,7 +460,7 @@ def main():
         allocation_result=max_response_result, budget_allocator=max_response_allocator
     )
 
-    plots = plotter.plot_all(display_plots=True, export_location=WORKING_DIR)
+    plots = plotter.plot_all(display_plots=True, export_location=str(WORKING_DIR))
 
     print(f"MMM analysis complete. All outputs saved to {WORKING_DIR}")
 
