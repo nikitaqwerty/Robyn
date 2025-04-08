@@ -1,5 +1,3 @@
-# robyn/allocator_v2/visualization/allocator_plotter.py
-
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -102,45 +100,53 @@ class AllocatorPlotter(BaseVisualizer):
         logger.debug("AllocatorPlotter initialized with data")
 
     def _plot_allocation_matrix(self) -> plt.Figure:
-        """Plot allocation matrix matching R format."""
+        """Plot allocation matrix as three adjacent heatmaps with no space between them."""
         if self.dt_optimOut is None:
             raise ValueError("dt_optimOut must be provided")
 
         logger.info("Creating allocation matrix plot")
         try:
-            # Adjust the figsize to make the plots smaller
-            fig, axes = plt.subplots(1, 3, figsize=(10, 6))  # Reduced from (15, 10)
+            # Create figure with GridSpec for precise layout control (no spaces)
+            fig = plt.figure(figsize=(15, 6))
+            gs = fig.add_gridspec(1, 3, wspace=0)  # Zero spacing between columns
+            axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
 
             scenarios = ["Initial", "Bounded", "Bounded x3"]
+            # Remove mCPA column from metrics
             metrics = [
                 "abs.mean\nspend",
                 "mean\nspend%",
                 "mean\nresponse%",
                 f"mean\n{self.metric}",
-                f"m{self.metric}",
             ]
 
             # Define color schemes for each scenario
             color_schemes = {
-                "Initial": sns.light_palette("#C0C0C0", as_cmap=True),
-                "Bounded": sns.light_palette("#6495ED", as_cmap=True),
-                "Bounded x3": sns.light_palette("#efb400", as_cmap=True),
+                "Initial": sns.light_palette("#C0C0C0", as_cmap=True),  # Silver/Gray
+                "Bounded": sns.light_palette("#6495ED", as_cmap=True),  # Blue
+                "Bounded x3": sns.light_palette("#efb400", as_cmap=True),  # Gold
             }
 
             for i, scenario in enumerate(scenarios):
                 data = self._get_allocation_data(scenario)
 
-                # Format data for heatmap
+                # Format data for heatmap with consistent formatting
                 plot_data = data.copy()
                 plot_data["abs.mean\nspend"] = plot_data["abs.mean\nspend"].apply(
                     lambda x: f"{x/1000:.0f}K"
                 )
                 for col in metrics[1:]:
-                    plot_data[col] = plot_data[col].apply(
-                        lambda x: (f"{x*100:.1f}%" if col.endswith("%") else f"{x:.2f}")
-                    )
+                    if col.endswith("%"):
+                        plot_data[col] = plot_data[col].apply(lambda x: f"{x*100:.1f}%")
+                    elif col == f"mean\nCPA":
+                        # Format CPA as a round number
+                        plot_data[col] = plot_data[col].apply(
+                            lambda x: f"{int(round(x))}"
+                        )
+                    else:
+                        plot_data[col] = plot_data[col].apply(lambda x: f"{x:.2f}")
 
-                # Normalize each column independently
+                # Normalize each column independently for proper color gradients
                 norm_data = data.copy()
                 for col in metrics:
                     col_values = norm_data[col].values
@@ -162,25 +168,138 @@ class AllocatorPlotter(BaseVisualizer):
                     annot=plot_data[metrics].values,
                     fmt="",
                     cbar=False,
-                    annot_kws={"fontsize": 8},  # Set the font size for annotations
+                    annot_kws={
+                        "fontsize": 7,
+                        "va": "center",
+                    },  # Smaller font, vertically centered
+                    linewidths=0.5,  # Add cell borders for better readability
                 )
 
-                axes[i].set_title(scenario, fontsize=8)
-                axes[i].set_ylabel("Paid Media" if i == 0 else "", fontsize=8)
+                # Set title above each heatmap
+                axes[i].set_title(scenario, fontsize=9, pad=5)
 
-                # Set the font size for xticks and yticks
-                axes[i].tick_params(axis="x", labelsize=8)  # Adjust xtick label size
-                axes[i].tick_params(axis="y", labelsize=8)  # Adjust ytick label size
+                # Only show y-axis label and tick labels for the first subplot
+                if i == 0:
+                    axes[i].set_ylabel("Paid Media", fontsize=9)
+                else:
+                    axes[i].set_ylabel("")
+                    axes[i].set_yticks([])  # Hide y ticks for non-first plots
 
+                # Customize x-tick labels
+                axes[i].set_xticklabels(metrics, rotation=45, ha="right", fontsize=7)
+
+                # Add thick border between heatmaps (except for the last one)
+                if i < len(scenarios) - 1:
+                    axes[i].spines["right"].set_visible(True)
+                    axes[i].spines["right"].set_color("black")
+                    axes[i].spines["right"].set_linewidth(2)
+
+            # Add main title
             plt.suptitle(
                 f"Budget Allocation per Paid Media Variable per {self.interval_type}",
+                fontsize=10,
+                y=0.98,
             )
-            plt.tight_layout(pad=2.0)
+
+            # Adjust layout to make room for the title while maintaining zero spacing
+            plt.subplots_adjust(top=0.85, wspace=0)
 
             return fig
 
         except Exception as e:
             logger.error("Failed to create allocation matrix plot: %s", str(e))
+            raise
+
+    def _get_allocation_data(self, scenario: str) -> pd.DataFrame:
+        """Prepare data for allocation matrix plot."""
+        try:
+            if scenario == "Initial":
+                # Calculate mean metric differently based on the metric type
+                if self.metric == "ROAS":
+                    mean_metric = self.dt_optimOut.init_response_unit / np.where(
+                        self.dt_optimOut.init_spend_unit > 0,
+                        self.dt_optimOut.init_spend_unit,
+                        np.inf,
+                    )
+                else:  # CPA
+                    mean_metric = np.where(
+                        self.dt_optimOut.init_response_unit > 0,
+                        self.dt_optimOut.init_spend_unit
+                        / self.dt_optimOut.init_response_unit,
+                        np.inf,
+                    )
+
+                data = {
+                    "abs.mean\nspend": self.dt_optimOut.init_spend_unit,
+                    "mean\nspend%": self.dt_optimOut.init_spend_unit
+                    / self.dt_optimOut.init_spend_unit.sum(),
+                    "mean\nresponse%": self.dt_optimOut.init_response_unit
+                    / self.dt_optimOut.init_response_unit.sum(),
+                    f"mean\n{self.metric}": mean_metric,
+                    # Removed mCPA column
+                }
+
+            elif scenario == "Bounded":
+                # Calculate mean metric differently based on the metric type
+                if self.metric == "ROAS":
+                    mean_metric = self.dt_optimOut.optm_response_unit / np.where(
+                        self.dt_optimOut.optm_spend_unit > 0,
+                        self.dt_optimOut.optm_spend_unit,
+                        np.inf,
+                    )
+                else:  # CPA
+                    mean_metric = np.where(
+                        self.dt_optimOut.optm_response_unit > 0,
+                        self.dt_optimOut.optm_spend_unit
+                        / self.dt_optimOut.optm_response_unit,
+                        np.inf,
+                    )
+
+                data = {
+                    "abs.mean\nspend": self.dt_optimOut.optm_spend_unit,
+                    "mean\nspend%": self.dt_optimOut.optm_spend_unit
+                    / self.dt_optimOut.optm_spend_unit.sum(),
+                    "mean\nresponse%": self.dt_optimOut.optm_response_unit
+                    / self.dt_optimOut.optm_response_unit.sum(),
+                    f"mean\n{self.metric}": mean_metric,
+                    # Removed mCPA column
+                }
+
+            else:  # "Bounded x3"
+                # Calculate mean metric differently based on the metric type
+                if self.metric == "ROAS":
+                    mean_metric = (
+                        self.dt_optimOut.optm_response_unit_unbound
+                        / np.where(
+                            self.dt_optimOut.optm_spend_unit_unbound > 0,
+                            self.dt_optimOut.optm_spend_unit_unbound,
+                            np.inf,
+                        )
+                    )
+                else:  # CPA
+                    mean_metric = np.where(
+                        self.dt_optimOut.optm_response_unit_unbound > 0,
+                        self.dt_optimOut.optm_spend_unit_unbound
+                        / self.dt_optimOut.optm_response_unit_unbound,
+                        np.inf,
+                    )
+
+                data = {
+                    "abs.mean\nspend": self.dt_optimOut.optm_spend_unit_unbound,
+                    "mean\nspend%": self.dt_optimOut.optm_spend_unit_unbound
+                    / self.dt_optimOut.optm_spend_unit_unbound.sum(),
+                    "mean\nresponse%": self.dt_optimOut.optm_response_unit_unbound
+                    / self.dt_optimOut.optm_response_unit_unbound.sum(),
+                    f"mean\n{self.metric}": mean_metric,
+                    # Removed mCPA column
+                }
+
+            return pd.DataFrame(data, index=self.dt_optimOut.channels)
+
+        except Exception as e:
+            logger.error(
+                "Failed to get allocation data for scenario %s: %s", scenario, str(e)
+            )
             raise
 
     def _plot_response_curves(self) -> plt.Figure:
@@ -541,63 +660,6 @@ class AllocatorPlotter(BaseVisualizer):
                 "Failed to calculate response curve for channel %d: %s",
                 channel_idx,
                 str(e),
-            )
-            raise
-
-    def _get_allocation_data(self, scenario: str) -> pd.DataFrame:
-        """Prepare data for allocation matrix plot."""
-        try:
-            if scenario == "Initial":
-                data = {
-                    "abs.mean\nspend": self.dt_optimOut.init_spend_unit,
-                    "mean\nspend%": self.dt_optimOut.init_spend_unit
-                    / self.dt_optimOut.init_spend_unit.sum(),
-                    "mean\nresponse%": self.dt_optimOut.init_response_unit
-                    / self.dt_optimOut.init_response_unit.sum(),
-                    f"mean\n{self.dt_optimOut.metric}": self.dt_optimOut.init_response_unit
-                    / np.where(
-                        self.dt_optimOut.init_spend_unit > 0,
-                        self.dt_optimOut.init_spend_unit,
-                        np.inf,
-                    ),
-                    f"m{self.dt_optimOut.metric}": self.dt_optimOut.init_response_marg_unit,  # Use pre-calculated marginal response
-                }
-            elif scenario == "Bounded":
-                data = {
-                    "abs.mean\nspend": self.dt_optimOut.optm_spend_unit,
-                    "mean\nspend%": self.dt_optimOut.optm_spend_unit
-                    / self.dt_optimOut.optm_spend_unit.sum(),
-                    "mean\nresponse%": self.dt_optimOut.optm_response_unit
-                    / self.dt_optimOut.optm_response_unit.sum(),
-                    f"mean\n{self.dt_optimOut.metric}": self.dt_optimOut.optm_response_unit
-                    / np.where(
-                        self.dt_optimOut.optm_spend_unit > 0,
-                        self.dt_optimOut.optm_spend_unit,
-                        np.inf,
-                    ),
-                    f"m{self.dt_optimOut.metric}": self.dt_optimOut.optm_response_marg_unit,  # Use pre-calculated marginal response
-                }
-            else:  # "Bounded x3"
-                data = {
-                    "abs.mean\nspend": self.dt_optimOut.optm_spend_unit_unbound,
-                    "mean\nspend%": self.dt_optimOut.optm_spend_unit_unbound
-                    / self.dt_optimOut.optm_spend_unit_unbound.sum(),
-                    "mean\nresponse%": self.dt_optimOut.optm_response_unit_unbound
-                    / self.dt_optimOut.optm_response_unit_unbound.sum(),
-                    f"mean\n{self.dt_optimOut.metric}": self.dt_optimOut.optm_response_unit_unbound
-                    / np.where(
-                        self.dt_optimOut.optm_spend_unit_unbound > 0,
-                        self.dt_optimOut.optm_spend_unit_unbound,
-                        np.inf,
-                    ),
-                    f"m{self.dt_optimOut.metric}": self.dt_optimOut.optm_response_marg_unit_unbound,  # Use pre-calculated marginal response
-                }
-
-            return pd.DataFrame(data, index=self.dt_optimOut.channels)
-
-        except Exception as e:
-            logger.error(
-                "Failed to get allocation data for scenario %s: %s", scenario, str(e)
             )
             raise
 
