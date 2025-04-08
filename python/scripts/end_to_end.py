@@ -38,7 +38,7 @@ from robyn.visualization.allocator_visualizer import AllocatorPlotter
 # ============== HYPERPARAMETERS AND CONFIGURATION ==============
 
 # Base path that will be prepended to DATA_PATH and WORKING_DIR
-BASE_PATH = Path("../../mmm")
+BASE_PATH = Path("../mmm")
 
 # Basic configuration
 VERSION = "0.5.test"
