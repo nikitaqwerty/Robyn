@@ -330,6 +330,9 @@ class AllocatorPlotter(BaseVisualizer):
             # Create a single figure and axis
             fig, ax = plt.subplots(figsize=(12, 8))
 
+            # Import Line2D for custom legend entries
+            from matplotlib.lines import Line2D
+
             # Set up colors for channels and scenarios
             channel_colors = plt.cm.tab10(
                 np.linspace(0, 1, len(self.dt_optimOut.channels))
@@ -369,7 +372,7 @@ class AllocatorPlotter(BaseVisualizer):
                     alpha=0.7,
                 )
 
-                # Plot projection curve (dotted line) - THIS WAS MISSING
+                # Plot projection curve (dotted line)
                 ax.plot(
                     projection_spend_range,
                     projection_response,
@@ -378,8 +381,10 @@ class AllocatorPlotter(BaseVisualizer):
                     alpha=0.7,
                 )
 
-                # Plot points for each scenario
-                for scenario_idx, scenario in enumerate(scenarios):
+                # Plot points only for "Bounded" and "Bounded x3" scenarios (skip "Initial")
+                for scenario_idx, scenario in enumerate(
+                    scenarios[1:], 1
+                ):  # Start from 1 to skip "Initial"
                     ax.scatter(
                         self.mainPoints.spend_points[scenario_idx, i],
                         self.mainPoints.response_points[scenario_idx, i],
@@ -391,29 +396,39 @@ class AllocatorPlotter(BaseVisualizer):
                         linewidths=1.5,
                     )
 
-                    # Optional: Add spend amount annotation for key points
-                    if i == 0:  # Only add legend entries for the first channel
-                        ax.scatter(
-                            [],
-                            [],
-                            marker=scenario_markers[scenario_idx],
-                            color="gray",
-                            edgecolors=scenario_colors[scenario_idx],
-                            s=80,
-                            label=scenarios[scenario_idx],
-                        )
+            # Create separate legend entries for channels and scenarios
+            channel_handles = []
+            channel_labels = []
+            for i, channel in enumerate(self.dt_optimOut.channels):
+                # Create a handle for each channel
+                handle = Line2D([0], [0], color=channel_colors[i], lw=1.5)
+                channel_handles.append(handle)
+                channel_labels.append(channel)
 
-            # Get legend handles and labels for channels
-            handles, labels = ax.get_legend_handles_labels()
+            # Create separate legend entries for scenarios (skip "Initial")
+            scenario_handles = []
+            scenario_labels = []
+            for scenario_idx, scenario in enumerate(scenarios[1:], 1):  # Skip "Initial"
+                # Create a handle for each scenario
+                handle = Line2D(
+                    [0],
+                    [0],
+                    marker=scenario_markers[scenario_idx],
+                    color="none",  # No line
+                    markerfacecolor="gray",  # Generic color (not channel-specific)
+                    markeredgecolor=scenario_colors[
+                        scenario_idx
+                    ],  # Edge color matches the scenario
+                    markersize=8,
+                )
+                scenario_handles.append(handle)
+                scenario_labels.append(scenario)
 
-            # Split handles and labels into channels and scenarios
-            channel_handles = handles[: len(self.dt_optimOut.channels)]
-            channel_labels = labels[: len(self.dt_optimOut.channels)]
-            scenario_handles = handles[len(self.dt_optimOut.channels) :]
-            scenario_labels = labels[len(self.dt_optimOut.channels) :]
+            # Create a custom legend entry for projection lines
+            projection_handle = Line2D([0], [0], color="black", lw=1.5, linestyle=":")
+            projection_label = "Projection (up to 3x initial spend)"
 
-            # Create two legends
-            # First legend: channels
+            # Add the channel legend
             leg1 = ax.legend(
                 channel_handles,
                 channel_labels,
@@ -422,36 +437,9 @@ class AllocatorPlotter(BaseVisualizer):
                 frameon=True,
                 fontsize=9,
             )
-
-            # Add the first legend manually
             ax.add_artist(leg1)
 
-            # Second legend: scenarios
-            ax.legend(
-                scenario_handles,
-                scenario_labels,
-                loc="upper right",
-                title="Scenarios",
-                frameon=True,
-                fontsize=9,
-            )
-
-            # Add a custom legend entry for projection lines
-            from matplotlib.lines import Line2D
-
-            custom_lines = [Line2D([0], [0], color="black", lw=1.5, linestyle=":")]
-            custom_labels = ["Projection (up to 3x initial spend)"]
-
-            # Create a third legend just for the projection line style
-            ax.legend(
-                custom_lines,
-                custom_labels,
-                loc="lower right",
-                frameon=True,
-                fontsize=9,
-            )
-
-            # Re-add the second legend to ensure it's still visible
+            # Add the scenario legend
             leg2 = ax.legend(
                 scenario_handles,
                 scenario_labels,
@@ -460,8 +448,17 @@ class AllocatorPlotter(BaseVisualizer):
                 frameon=True,
                 fontsize=9,
             )
-            ax.add_artist(leg1)
             ax.add_artist(leg2)
+
+            # Add the projection line legend
+            leg3 = ax.legend(
+                [projection_handle],
+                [projection_label],
+                loc="lower right",
+                frameon=True,
+                fontsize=9,
+            )
+            ax.add_artist(leg3)
 
             # Customize plot
             ax.set_title(
