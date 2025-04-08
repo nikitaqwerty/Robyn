@@ -310,6 +310,127 @@ class AllocatorPlotter(BaseVisualizer):
             logger.error("Failed to create response curves plot: %s", str(e))
             raise
 
+    def _plot_combined_response_curves(self) -> plt.Figure:
+        """Plot response curves for all channels on a single plot for comparison."""
+        if any(
+            attr is None
+            for attr in [self.dt_optimOut, self.mainPoints, self.budget_allocator]
+        ):
+            raise ValueError("All data attributes must be provided")
+
+        logger.info("Creating combined response curves plot")
+        try:
+            # Create a single figure and axis
+            fig, ax = plt.subplots(figsize=(12, 8))
+
+            # Set up colors for channels and scenarios
+            channel_colors = plt.cm.tab10(
+                np.linspace(0, 1, len(self.dt_optimOut.channels))
+            )
+            scenario_markers = ["o", "s", "^"]  # Different marker shapes for scenarios
+            scenarios = ["Initial", "Bounded", "Bounded x3"]
+            scenario_colors = ["gray", "#4682B4", "#DAA520"]  # Match existing colors
+
+            # Plot each channel
+            for i, channel in enumerate(self.dt_optimOut.channels):
+                # Generate response curve
+                max_spend = np.max(self.mainPoints.spend_points[:, i]) * 1.5
+                spend_range = np.linspace(0, max_spend, 100)
+                response = self._calculate_response_curve_hill(spend_range, i)
+
+                # Plot main curve for this channel
+                ax.plot(
+                    spend_range,
+                    response,
+                    label=channel,
+                    color=channel_colors[i],
+                    alpha=0.7,
+                )
+
+                # Plot points for each scenario
+                for scenario_idx, scenario in enumerate(scenarios):
+                    ax.scatter(
+                        self.mainPoints.spend_points[scenario_idx, i],
+                        self.mainPoints.response_points[scenario_idx, i],
+                        color=channel_colors[i],
+                        marker=scenario_markers[scenario_idx],
+                        s=80,
+                        alpha=0.8,
+                        edgecolors=scenario_colors[scenario_idx],
+                        linewidths=1.5,
+                    )
+
+                    # Optional: Add spend amount annotation for key points
+                    if i == 0:  # Only add legend entries for the first channel
+                        ax.scatter(
+                            [],
+                            [],
+                            marker=scenario_markers[scenario_idx],
+                            color="gray",
+                            edgecolors=scenario_colors[scenario_idx],
+                            s=80,
+                            label=scenarios[scenario_idx],
+                        )
+
+            # Get legend handles and labels for channels
+            handles, labels = ax.get_legend_handles_labels()
+
+            # Split handles and labels into channels and scenarios
+            channel_handles = handles[: len(self.dt_optimOut.channels)]
+            channel_labels = labels[: len(self.dt_optimOut.channels)]
+            scenario_handles = handles[len(self.dt_optimOut.channels) :]
+            scenario_labels = labels[len(self.dt_optimOut.channels) :]
+
+            # Create two legends
+            # First legend: channels
+            leg1 = ax.legend(
+                channel_handles,
+                channel_labels,
+                loc="upper left",
+                title="Channels",
+                frameon=True,
+                fontsize=9,
+            )
+
+            # Add the first legend manually
+            ax.add_artist(leg1)
+
+            # Second legend: scenarios
+            ax.legend(
+                scenario_handles,
+                scenario_labels,
+                loc="upper right",
+                title="Scenarios",
+                frameon=True,
+                fontsize=9,
+            )
+
+            # Customize plot
+            ax.set_title(
+                f"Comparative Response Curves Across All Channels\n"
+                f"Spend per {self.interval_type}"
+            )
+            ax.set_xlabel("Spend")
+            ax.set_ylabel("Response")
+
+            # Format axis labels
+            ax.yaxis.set_major_formatter(
+                plt.FuncFormatter(lambda x, p: format(int(x), ","))
+            )
+            ax.xaxis.set_major_formatter(
+                plt.FuncFormatter(lambda x, p: format(int(x), ","))
+            )
+
+            # Add grid for readability
+            ax.grid(True, linestyle="--", alpha=0.3)
+
+            plt.tight_layout()
+            return fig
+
+        except Exception as e:
+            logger.error("Failed to create combined response curves plot: %s", str(e))
+            raise
+
     def _calculate_response_curve_hill(
         self, spend_range: np.ndarray, channel_idx: int
     ) -> np.ndarray:
@@ -335,10 +456,13 @@ class AllocatorPlotter(BaseVisualizer):
             channel = self.budget_allocator.allocator_data_preparer.media_spend_sorted[
                 channel_idx
             ]
-            
+
             # Calculate inflexion point directly as in data_preparation.py
             adstocked_data = self.budget_allocator.allocator_data_preparer.pareto_result.media_vec_collect[
-                self.budget_allocator.allocator_data_preparer.pareto_result.media_vec_collect["type"] == "adstockedMedia"
+                self.budget_allocator.allocator_data_preparer.pareto_result.media_vec_collect[
+                    "type"
+                ]
+                == "adstockedMedia"
             ]
             # Get max value for this channel's adstocked data
             max_value = adstocked_data[channel].max()
@@ -434,6 +558,7 @@ class AllocatorPlotter(BaseVisualizer):
                 "budget_opt": self._plot_budget_comparison(),
                 "allocation": self._plot_allocation_matrix(),
                 "response": self._plot_response_curves(),
+                "combined_response": self._plot_combined_response_curves(),  # Add the new plot
             }
 
             if display_plots:
