@@ -95,85 +95,75 @@ class ParetoVisualizer(BaseVisualizer):
 
     def _add_metrics_to_plot(self, fig, metrics, solution_id):
         """
-        Helper method to add metrics text to a plot.
+        Helper method to add metrics text to a plot in the top right corner.
 
         Args:
             fig: matplotlib Figure object
             metrics: Dictionary of metric values
             solution_id: Solution ID string
         """
-        if metrics:
-            metrics_to_display = {
-                k: metrics.get(k, float("nan"))  # Use NaN for missing metrics
-                for k in [
-                    "rsq_train",
-                    "rsq_val",
-                    "rsq_test",
-                    "nrmse",
-                    "nrmse_train",
-                    "nrmse_val",
-                    "nrmse_test",
-                    "decomp.rssd",
-                    "mae",
-                ]
-            }
+        if not metrics:
+            return
 
-            metrics_str_lines = [
-                f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
-                f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
-                f"MAE: {metrics_to_display['mae']:.3f}",
-                f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}",
+        # Get metrics to display, using NaN for missing metrics
+        metrics_to_display = {
+            k: metrics.get(k, float("nan"))  # Use NaN for missing metrics
+            for k in [
+                "rsq_train",
+                "rsq_val",
+                "rsq_test",
+                "nrmse",
+                "nrmse_train",
+                "nrmse_val",
+                "nrmse_test",
+                "decomp.rssd",
+                "mae",
             ]
+        }
 
-            # Place text below the title
+        # Format metrics as text lines
+        metrics_str_lines = [
+            f"Metrics for Solution {solution_id}",
+            f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
+            f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
+            f"MAE: {metrics_to_display['mae']:.3f}",
+            f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}",
+        ]
+
+        # Set position for metrics text (top right corner)
+        x_pos = 0.98  # Right side of figure
+        y_start = 0.98  # Top of figure
+        line_spacing = 0.025  # Space between lines
+
+        # Create a common bbox style for all text elements
+        metrics_box = dict(
+            facecolor="white",
+            alpha=0.8,
+            edgecolor="lightgray",
+            boxstyle="round,pad=0.3",
+        )
+
+        # Add each metrics line with background box
+        for i, line in enumerate(metrics_str_lines):
+            # First line (title) is bold
+            weight = "bold" if i == 0 else "normal"
+            fontsize = 10 if i == 0 else 9
+            color = "black" if i == 0 else "grey"
+
             fig.text(
-                0.5,
-                0.95,
-                f"Metrics for Solution {solution_id}",
-                ha="center",
-                va="bottom",
-                fontsize=10,
-                weight="bold",
-            )
-            fig.text(
-                0.5,
-                0.93,
-                metrics_str_lines[0],
-                ha="center",
+                x_pos,
+                y_start - (i * line_spacing),
+                line,
+                ha="right",  # Right-aligned text
                 va="top",
-                fontsize=9,
-                color="grey",
-            )
-            fig.text(
-                0.5,
-                0.91,
-                metrics_str_lines[1],
-                ha="center",
-                va="top",
-                fontsize=9,
-                color="grey",
-            )
-            fig.text(
-                0.5,
-                0.89,
-                metrics_str_lines[2],
-                ha="center",
-                va="top",
-                fontsize=9,
-                color="grey",
-            )
-            fig.text(
-                0.5,
-                0.87,
-                metrics_str_lines[3],
-                ha="center",
-                va="top",
-                fontsize=9,
-                color="grey",
+                fontsize=fontsize,
+                weight=weight,
+                color=color,
+                bbox=metrics_box,  # Add box to all lines for better visibility
             )
 
-            # Adjust top margin to make space for the text
-            plt.subplots_adjust(top=0.82)  # Reduced top margin for additional metrics
+        # No need to adjust margins since we're using corner positioning
+        return None
 
     def generate_waterfall(
         self,
