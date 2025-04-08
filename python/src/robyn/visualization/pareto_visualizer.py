@@ -546,6 +546,176 @@ class ParetoVisualizer(BaseVisualizer):
 
         return None
 
+    def get_last_calendar_year_quarters(self) -> List[List[str]]:
+        """
+        Get date ranges for the four quarters of the last complete calendar year.
+
+        Returns:
+            List of four date ranges, each containing [start_date, end_date] as strings.
+        """
+        # Get the available dates from the data
+        ts_data = None
+
+        # Try to get dates from decomp_vec if available
+        if (
+            hasattr(self.pareto_result, "x_decomp_vec_collect")
+            and not self.pareto_result.x_decomp_vec_collect.empty
+        ):
+            ts_data = pd.to_datetime(
+                self.pareto_result.x_decomp_vec_collect["ds"].unique()
+            )
+        elif (
+            self.mmm_data
+            and hasattr(self.mmm_data, "dt")
+            and "ds" in self.mmm_data.dt.columns
+        ):
+            # Get dates directly from mmm_data
+            ts_data = pd.to_datetime(self.mmm_data.dt["ds"].unique())
+
+        if ts_data is None or len(ts_data) == 0:
+            logger.warning(
+                "Could not find date information to determine last calendar year quarters."
+            )
+            # Return default dates for previous year's quarters (fallback)
+            year = pd.Timestamp.now().year - 1
+            return [
+                [f"{year}-01-01", f"{year}-03-31"],
+                [f"{year}-04-01", f"{year}-06-30"],
+                [f"{year}-07-01", f"{year}-09-30"],
+                [f"{year}-10-01", f"{year}-12-31"],
+            ]
+
+        # Find the most recent complete calendar year in the data
+        max_date = pd.Timestamp(max(ts_data))
+        min_date = pd.Timestamp(min(ts_data))
+
+        # Find the most recent year that has all quarters (at least partially) covered
+        last_year = max_date.year
+        if (
+            max_date.month < 12
+        ):  # If current year doesn't have Q4 data, use previous year
+            last_year -= 1
+
+        # Ensure the chosen year has data (at least check if the year is within the data range)
+        if pd.Timestamp(f"{last_year}-01-01") < min_date:
+            # If earliest data is after the start of the chosen year, adjust to use the year of the earliest data
+            last_year = min_date.year
+
+        # Define the quarters
+        q1 = [f"{last_year}-01-01", f"{last_year}-03-31"]
+        q2 = [f"{last_year}-04-01", f"{last_year}-06-30"]
+        q3 = [f"{last_year}-07-01", f"{last_year}-09-30"]
+        q4 = [f"{last_year}-10-01", f"{last_year}-12-31"]
+
+        return [q1, q2, q3, q4]
+
+    def generate_quarterly_waterfall(
+        self,
+        solution_id: str,
+        baseline_level: int = 0,
+        metrics: Optional[Dict[str, float]] = None,
+    ) -> Optional[plt.Figure]:
+        """
+        Generate waterfall charts for each quarter of the last calendar year in a 2x2 grid.
+
+        Args:
+            solution_id: ID of the solution to visualize
+            baseline_level: Level of baseline variables to include
+            metrics: Optional dictionary containing model performance metrics
+
+        Returns:
+            Optional[plt.Figure]: Generated matplotlib Figure object with 4 subplots
+        """
+        logger.debug("Starting generation of quarterly waterfall plots")
+
+        # Check if solution_id exists in the data
+        if solution_id not in self.pareto_result.plot_data_collect:
+            if (
+                self.unfiltered_pareto_result
+                and solution_id
+                in self.unfiltered_pareto_result.result_hyp_param["sol_id"].values
+            ):
+                logger.warning(
+                    f"Solution ID {solution_id} found in unfiltered results but not in plot_data_collect."
+                )
+            else:
+                logger.warning(
+                    f"Invalid solution ID: {solution_id}. Solution not found in any available data."
+                )
+            return None
+
+        # Get quarterly date ranges
+        quarters = self.get_last_calendar_year_quarters()
+        quarter_names = ["Q1", "Q2", "Q3", "Q4"]
+        year = quarters[0][0].split("-")[
+            0
+        ]  # Extract year from first quarter's start date
+
+        # Create a figure with 2x2 grid
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        axes = axes.flatten()
+
+        # Generate waterfall for each quarter
+        for i, (quarter_range, quarter_name) in enumerate(zip(quarters, quarter_names)):
+            try:
+                # Call existing method for date range, but don't pass metrics to individual subplots
+                self.generate_waterfall_for_date_range(
+                    solution_id=solution_id,
+                    date_range=quarter_range,
+                    ax=axes[i],
+                    baseline_level=baseline_level,
+                    metrics=None,  # Don't add metrics to individual subplots
+                )
+
+                # Adjust subplot title to be cleaner
+                quarter_title = f"{year} {quarter_name}"
+                axes[i].set_title(quarter_title, pad=20, y=1.05)
+
+            except Exception as e:
+                logger.warning(
+                    f"Error generating quarterly waterfall for {quarter_name}: {e}"
+                )
+                axes[i].text(
+                    0.5,
+                    0.5,
+                    f"Error generating {quarter_name} waterfall",
+                    ha="center",
+                    va="center",
+                    transform=axes[i].transAxes,
+                )
+                # Add error details
+                axes[i].text(
+                    0.5,
+                    0.4,
+                    str(e),
+                    ha="center",
+                    va="center",
+                    transform=axes[i].transAxes,
+                    fontsize=9,
+                    color="gray",
+                    wrap=True,
+                )
+
+        # Add overall title
+        fig.suptitle(
+            f"Quarterly Response Decomposition Waterfall Charts for {year}\nSolution {solution_id}",
+            fontsize=16,
+            y=0.98,
+        )
+
+        # Add metrics to the overall figure
+        if metrics:
+            self._add_metrics_to_plot(fig, metrics, solution_id)
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(
+            top=0.85, wspace=0.3, hspace=0.4
+        )  # Make room for overall title and metrics
+
+        logger.debug(f"Successfully generated quarterly waterfall plots for {year}")
+        return fig
+
     def generate_fitted_vs_actual(
         self,
         solution_id: str,
@@ -1651,12 +1821,14 @@ class ParetoVisualizer(BaseVisualizer):
             logger.info(
                 f"Generating plots for unique solution IDs: {solution_ids_to_plot}"
             )
+            # In the plot_all() method within the solution-specific plots section:
             plot_funcs_solution = {
                 "waterfall": self.generate_waterfall,
                 "fitted_vs_actual": self.generate_fitted_vs_actual,
                 "diagnostic_plot": self.generate_diagnostic_plot,
                 "immediate_vs_carryover": self.generate_immediate_vs_carryover,
                 "adstock_rate": self.generate_adstock_rate,
+                "quarterly_waterfall": self.generate_quarterly_waterfall,  # Add this line
             }
 
             for solution_id in solution_ids_to_plot:
