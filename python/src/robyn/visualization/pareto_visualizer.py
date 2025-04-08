@@ -1229,9 +1229,8 @@ class ParetoVisualizer(BaseVisualizer):
                               Defaults to 'best_rsq_train'.
         """
         figures_to_display: Dict[str, plt.Figure] = {}
-        target_solutions: Dict[str, Optional[str]] = (
-            {}
-        )  # To store solution IDs based on criteria
+        figures_to_export: Dict[str, plt.Figure] = {}
+        target_solutions: Dict[str, Optional[str]] = {}  # To store solution IDs based on criteria
         export_path: Optional[Path] = None
 
         if export_location:
@@ -1397,17 +1396,8 @@ class ParetoVisualizer(BaseVisualizer):
                 ):  # Display non-solution plot if its key matches criteria
                     should_display = True
 
-            saved = False
             if export_path:
-                try:
-                    filename = export_path / f"{plot_key}.png"
-                    fig.savefig(filename, bbox_inches="tight")
-                    logger.debug(f"Exported plot: {filename}")
-                    saved = True
-                except Exception as e:
-                    logger.error(
-                        f"Error exporting plot '{plot_key}': {e}", exc_info=True
-                    )
+                figures_to_export[plot_key] = fig
 
             if should_display:
                 figures_to_display[plot_key] = fig  # Keep figure open for display
@@ -1540,6 +1530,19 @@ class ParetoVisualizer(BaseVisualizer):
                             f"Error generating plot '{full_name}' for solution {solution_id}: {e}",
                             exc_info=True,
                         )
+
+        # --- Export Plots ---
+        if export_path and figures_to_export:
+            try:
+                self.export_plots_fig(export_path, figures_to_export)
+                logger.info(f"Successfully exported {len(figures_to_export)} plots to {export_path}")
+            except Exception as e:
+                logger.error(f"Error exporting plots: {e}", exc_info=True)
+            finally:
+                # Close all exported figures
+                for fig in figures_to_export.values():
+                    plt.close(fig)
+                figures_to_export.clear()
 
         # --- Display Collected Plots ---
         if display_plots:
