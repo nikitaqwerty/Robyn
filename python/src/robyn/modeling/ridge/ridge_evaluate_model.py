@@ -55,8 +55,10 @@ class RidgeModelEvaluator:
         trial: int,
         seed: int,
         total_trials: int,
-        val_size: int = 5,  # New parameter for fixed validation size
-        test_size: int = 5,  # New parameter for fixed test size
+        val_size: int = 5,
+        test_size: int = 5,
+        fixed_coefficients: Optional[Dict[str, float]] = None,
+        fixed_intercept: Optional[float] = None,
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -152,8 +154,10 @@ class RidgeModelEvaluator:
                         trial=trial,
                         intercept_sign=intercept_sign,
                         intercept=intercept,
-                        val_size=val_size,  # Pass the new parameter
-                        test_size=test_size,  # Pass the new parameter
+                        val_size=val_size,
+                        test_size=test_size,
+                        fixed_coefficients=fixed_coefficients,
+                        fixed_intercept=fixed_intercept,
                     )
 
                 self.logger.debug(
@@ -308,6 +312,8 @@ class RidgeModelEvaluator:
         intercept: bool,
         val_size: int = 5,  # New parameter for fixed validation size
         test_size: int = 5,  # New parameter for fixed test size
+        fixed_coefficients: Optional[Dict[str, float]] = None,
+        fixed_intercept: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set"""
         # Get transformed data

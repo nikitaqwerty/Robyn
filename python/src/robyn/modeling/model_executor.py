@@ -48,9 +48,17 @@ class ModelExecutor(BaseModelExecutor):
         lambda_control: Optional[float] = None,
         val_size: int = 5,  # New parameter for fixed validation size
         test_size: int = 5,  # New parameter for fixed test size
+        fixed_coefficients: Optional[Dict[str, float]] = None,  # New parameter for fixed coefficients
+        fixed_intercept: Optional[float] = None,  # New parameter for fixed intercept
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
+        
+        Args:
+            fixed_coefficients: Dictionary mapping feature names to fixed coefficient values.
+                                Features not included will be fitted normally.
+            fixed_intercept: Fixed value for the intercept. If provided, the intercept 
+                            will not be fitted but set to this value.
         """
         self.logger.info("Starting model execution with model_name=%s", model_name)
         self.logger.debug(
@@ -101,6 +109,8 @@ class ModelExecutor(BaseModelExecutor):
                     cores=cores,
                     val_size=val_size,
                     test_size=test_size,
+                    fixed_coefficients=fixed_coefficients,
+                    fixed_intercept=fixed_intercept,
                 )
                 self.logger.info("Model building completed successfully")
 
