@@ -260,6 +260,13 @@ def main():
     print("Model outputs summary:")
     print(output_models.all_x_decomp_agg.head())
     print(output_models.all_result_hyp_param.head())
+    print(
+        "Best MAE coeffs:",
+        output_models.all_x_decomp_agg.loc[
+            output_models.all_x_decomp_agg.mae
+            == output_models.all_x_decomp_agg.mae.min()
+        ],
+    )
 
     # Display convergence plots if available
     if "moo_cloud_plot" in output_models.convergence:
