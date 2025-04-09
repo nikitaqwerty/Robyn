@@ -12,6 +12,7 @@ def create_ridge_model_rpy2(
     intercept=True,
     intercept_sign="non_negative",
     penalty_factor=None,
+    fixed_coefficients=None,  # New parameter for fixed coefficients
 ):
     """Create a Ridge regression model using rpy2 to access glmnet.
 
@@ -20,7 +21,12 @@ def create_ridge_model_rpy2(
         n_samples: Number of samples (not directly used, but kept for API consistency)
         fit_intercept: Whether to fit the intercept
         standardize: Whether to standardize the input features
-        **kwargs: Additional arguments to pass to glmnet
+        lower_limits: Lower limits for coefficients
+        upper_limits: Upper limits for coefficients
+        intercept: Whether to include intercept
+        intercept_sign: Sign constraint for intercept ("non_negative" or None)
+        penalty_factor: Penalty factors for each coefficient
+        fixed_coefficients: List of fixed coefficient values (None for coefficients to be fitted)
 
     Returns:
         A Ridge regression model using rpy2 to access glmnet.
@@ -63,54 +69,183 @@ def create_ridge_model_rpy2(
             self._X_matrix_cache = {}
             self.full_coef_ = None  # Add this to store full coefficient array
             self.df_int = 1  # Initialize to 1
+            self.fixed_coefficients = fixed_coefficients  # Store fixed coefficients
 
         def fit(self, X, y):
             X = np.asarray(X)
             y = np.asarray(y)
 
-            # Convert Python objects to R
-            with localconverter(ro.default_converter + numpy2ri.converter):
-                ro.r.assign("X_r", X)
-                ro.r.assign("y_r", y)
-                ro.r.assign("lambda_value", self.lambda_value)
-                ro.r.assign(
-                    "lower_limits_r",
-                    lower_limits if lower_limits is not None else ro.r("NULL"),
-                )
-                ro.r.assign(
-                    "upper_limits_r",
-                    upper_limits if upper_limits is not None else ro.r("NULL"),
-                )
-                ro.r.assign(
-                    "penalty_factor_r",
-                    penalty_factor if penalty_factor is not None else ro.r("NULL"),
+            # Handle fixed coefficients
+            fixed_cols = []  # Indices of columns with fixed coefficients
+            fit_cols = []  # Indices of columns to be fitted
+
+            # If fixed coefficients are provided, separate the data for fitting
+            if self.fixed_coefficients is not None:
+                if len(self.fixed_coefficients) != X.shape[1]:
+                    raise ValueError(
+                        f"Length of fixed_coefficients ({len(self.fixed_coefficients)}) must match number of features ({X.shape[1]})"
+                    )
+
+                fixed_cols = [
+                    i
+                    for i, coef in enumerate(self.fixed_coefficients)
+                    if coef is not None
+                ]
+                fit_cols = [
+                    i for i, coef in enumerate(self.fixed_coefficients) if coef is None
+                ]
+
+                # Get fixed values for later
+                fixed_values = np.array(
+                    [coef for coef in self.fixed_coefficients if coef is not None]
                 )
 
-                # First attempt: Fit with intercept
-                r_code = """
-                # First fit with intercept
-                r_model <<- glmnet(
-                    x = X_r,
-                    y = y_r,
-                    family = "gaussian",
-                    alpha = 0,
-                    lambda = lambda_value,
-                    lower.limits = lower_limits_r,
-                    upper.limits = upper_limits_r,
-                    type.measure = "mse",
-                    penalty.factor = penalty_factor_r,
-                    intercept = TRUE
-                )
-                coef_values <<- as.numeric(coef(r_model, s = lambda_value))
-                """
-                ro.r(r_code)
+                if fixed_cols:  # If we have fixed coefficients
+                    # Adjust y by subtracting the contribution of fixed coefficients
+                    y_adjusted = y.copy()
+                    X_fixed = X[:, fixed_cols]
+                    y_adjusted = y_adjusted - np.dot(X_fixed, fixed_values)
 
-                # Check intercept sign constraint
-                coef_array = np.array(ro.r["coef_values"])
-                if self.intercept_sign == "non_negative" and coef_array[0] < 0:
-                    # Second attempt: Refit without intercept
+                    # Prepare the reduced X with only columns to be fitted
+                    X_fit = X[:, fit_cols]
+
+                    # Convert Python objects to R
+                    with localconverter(ro.default_converter + numpy2ri.converter):
+                        ro.r.assign("X_r", X_fit)
+                        ro.r.assign("y_r", y_adjusted)
+                        ro.r.assign("lambda_value", self.lambda_value)
+                        ro.r.assign(
+                            "lower_limits_r",
+                            lower_limits if lower_limits is not None else ro.r("NULL"),
+                        )
+                        ro.r.assign(
+                            "upper_limits_r",
+                            upper_limits if upper_limits is not None else ro.r("NULL"),
+                        )
+                        ro.r.assign(
+                            "penalty_factor_r",
+                            (
+                                penalty_factor
+                                if penalty_factor is not None
+                                else ro.r("NULL")
+                            ),
+                        )
+
+                        # First attempt: Fit with intercept on reduced data
+                        r_code = """
+                        # First fit with intercept
+                        r_model <<- glmnet(
+                            x = X_r,
+                            y = y_r,
+                            family = "gaussian",
+                            alpha = 0,
+                            lambda = lambda_value,
+                            lower.limits = lower_limits_r,
+                            upper.limits = upper_limits_r,
+                            type.measure = "mse",
+                            penalty.factor = penalty_factor_r,
+                            intercept = TRUE
+                        )
+                        coef_values <<- as.numeric(coef(r_model, s = lambda_value))
+                        """
+                        ro.r(r_code)
+
+                        # Check intercept sign constraint
+                        coef_array = np.array(ro.r["coef_values"])
+                        if self.intercept_sign == "non_negative" and coef_array[0] < 0:
+                            # Second attempt: Refit without intercept
+                            r_code = """
+                            # Refit without intercept
+                            r_model <<- glmnet(
+                                x = X_r,
+                                y = y_r,
+                                family = "gaussian",
+                                alpha = 0,
+                                lambda = lambda_value,
+                                lower.limits = lower_limits_r,
+                                upper.limits = upper_limits_r,
+                                type.measure = "mse",
+                                penalty.factor = penalty_factor_r,
+                                intercept = FALSE
+                            )
+                            coef_values <<- as.numeric(coef(r_model, s = lambda_value))
+                            """
+                            ro.r(r_code)
+                            coef_array = np.array(ro.r["coef_values"])
+                            self.fit_intercept = False
+                            self.df_int = 0  # Set df_int to 0 when intercept is dropped
+                        else:
+                            self.df_int = 1  # Keep df_int as 1 when intercept is kept
+
+                        # Store model and coefficients
+                        self.fitted_model = ro.r["r_model"]
+                        if self.fit_intercept:
+                            self.intercept_ = float(coef_array[0])
+                            fitted_coef = coef_array[1:]
+                        else:
+                            self.intercept_ = 0.0
+                            fitted_coef = coef_array[1:]
+
+                        # Combine fitted and fixed coefficients
+                        combined_coef = np.zeros(X.shape[1])
+                        for i, col_idx in enumerate(fit_cols):
+                            combined_coef[col_idx] = fitted_coef[i]
+                        for i, col_idx in enumerate(fixed_cols):
+                            combined_coef[col_idx] = fixed_values[i]
+
+                        self.coef_ = combined_coef
+                        # Create full coefficient array including intercept
+                        self.full_coef_ = np.concatenate(
+                            [[self.intercept_], self.coef_]
+                        )
+                else:
+                    # If all coefficients are fixed, no need to fit
+                    self.coef_ = np.array(self.fixed_coefficients)
+                    self.intercept_ = 0.0  # No intercept in this case
+                    self.full_coef_ = np.concatenate([[self.intercept_], self.coef_])
+
+                    # Create a dummy model for compatibility
+                    with localconverter(ro.default_converter + numpy2ri.converter):
+                        ro.r.assign("X_r", X)
+                        ro.r.assign("y_r", y)
+                        ro.r.assign("lambda_value", self.lambda_value)
+                        r_code = """
+                        # Create a dummy model
+                        r_model <<- glmnet(
+                            x = X_r,
+                            y = y_r,
+                            family = "gaussian",
+                            alpha = 0,
+                            lambda = lambda_value,
+                            intercept = FALSE
+                        )
+                        """
+                        ro.r(r_code)
+                        self.fitted_model = ro.r["r_model"]
+                        self.fit_intercept = False
+                        self.df_int = 0
+            else:
+                # Original fitting logic if no fixed coefficients
+                with localconverter(ro.default_converter + numpy2ri.converter):
+                    ro.r.assign("X_r", X)
+                    ro.r.assign("y_r", y)
+                    ro.r.assign("lambda_value", self.lambda_value)
+                    ro.r.assign(
+                        "lower_limits_r",
+                        lower_limits if lower_limits is not None else ro.r("NULL"),
+                    )
+                    ro.r.assign(
+                        "upper_limits_r",
+                        upper_limits if upper_limits is not None else ro.r("NULL"),
+                    )
+                    ro.r.assign(
+                        "penalty_factor_r",
+                        penalty_factor if penalty_factor is not None else ro.r("NULL"),
+                    )
+
+                    # First attempt: Fit with intercept
                     r_code = """
-                    # Refit without intercept
+                    # First fit with intercept
                     r_model <<- glmnet(
                         x = X_r,
                         y = y_r,
@@ -121,39 +256,64 @@ def create_ridge_model_rpy2(
                         upper.limits = upper_limits_r,
                         type.measure = "mse",
                         penalty.factor = penalty_factor_r,
-                        intercept = FALSE
+                        intercept = TRUE
                     )
                     coef_values <<- as.numeric(coef(r_model, s = lambda_value))
                     """
                     ro.r(r_code)
-                    coef_array = np.array(ro.r["coef_values"])
-                    self.fit_intercept = False
-                    self.df_int = 0  # Set df_int to 0 when intercept is dropped
-                else:
-                    self.df_int = 1  # Keep df_int as 1 when intercept is kept
 
-                # Store model and coefficients
-                self.fitted_model = ro.r["r_model"]
-                if self.fit_intercept:
-                    self.intercept_ = float(coef_array[0])
-                    self.coef_ = coef_array[1:]
-                    self.full_coef_ = coef_array  # Store full array including intercept
-                else:
-                    self.intercept_ = 0.0
-                    self.coef_ = coef_array[1:]
-                    # Create full coefficient array with 0 intercept
-                    self.full_coef_ = np.concatenate([[0.0], self.coef_])
+                    # Check intercept sign constraint
+                    coef_array = np.array(ro.r["coef_values"])
+                    if self.intercept_sign == "non_negative" and coef_array[0] < 0:
+                        # Second attempt: Refit without intercept
+                        r_code = """
+                        # Refit without intercept
+                        r_model <<- glmnet(
+                            x = X_r,
+                            y = y_r,
+                            family = "gaussian",
+                            alpha = 0,
+                            lambda = lambda_value,
+                            lower.limits = lower_limits_r,
+                            upper.limits = upper_limits_r,
+                            type.measure = "mse",
+                            penalty.factor = penalty_factor_r,
+                            intercept = FALSE
+                        )
+                        coef_values <<- as.numeric(coef(r_model, s = lambda_value))
+                        """
+                        ro.r(r_code)
+                        coef_array = np.array(ro.r["coef_values"])
+                        self.fit_intercept = False
+                        self.df_int = 0  # Set df_int to 0 when intercept is dropped
+                    else:
+                        self.df_int = 1  # Keep df_int as 1 when intercept is kept
+
+                    # Store model and coefficients
+                    self.fitted_model = ro.r["r_model"]
+                    if self.fit_intercept:
+                        self.intercept_ = float(coef_array[0])
+                        self.coef_ = coef_array[1:]
+                        self.full_coef_ = (
+                            coef_array  # Store full array including intercept
+                        )
+                    else:
+                        self.intercept_ = 0.0
+                        self.coef_ = coef_array[1:]
+                        # Create full coefficient array with 0 intercept
+                        self.full_coef_ = np.concatenate([[0.0], self.coef_])
 
             return self
 
         def predict(self, X):
             X = np.asarray(X)
 
-            if X.shape[0] < 1000:
+            if X.shape[0] < 1000 or self.fixed_coefficients is not None:
+                # Always use direct computation when fixed coefficients are provided
                 predictions = np.dot(X, self.coef_) + self.intercept_
                 self.logger.debug(f"Using direct computation")
             else:
-                # For larger matrices, use R but check cache first
+                # For larger matrices without fixed coefficients, use R but check cache first
                 X_hash = hash(X.tobytes())
                 if X_hash in self._prediction_cache:
                     return self._prediction_cache[X_hash]
