@@ -372,7 +372,7 @@ class ParetoVisualizer(BaseVisualizer):
         ]
 
         # Convert 'ds' to datetime and filter by date range
-        xDecompVec["ds"] = pd.to_datetime(xDecompVec["ds"])
+        xDecompVec.loc[:, "ds"] = pd.to_datetime(xDecompVec["ds"])
         date_filtered = xDecompVec[
             (xDecompVec["ds"] >= start_date) & (xDecompVec["ds"] <= end_date)
         ]
