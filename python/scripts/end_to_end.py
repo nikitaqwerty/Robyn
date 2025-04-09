@@ -50,9 +50,12 @@ END_DATE = "2025-01-01"
 # Channel-specific hyperparameters
 CHANNEL_HYPERPARAMETERS = {
     "AffiliatesCPA_spend": {
-        "alphas": [0.5, 3],
-        "gammas": [0.3, 1],
-        "thetas": [0, 0.3],
+        # "alphas": [0.5, 3],
+        # "gammas": [0.3, 1],
+        # "thetas": [0, 0.3],
+        "alphas": [2.995269, 2.995269],
+        "gammas": [0.999621, 0.999621],
+        "thetas": [0.021261, 0.021261],
     },
     "Comms_spend": {
         "alphas": [0.5, 3],
@@ -100,7 +103,7 @@ MODEL_EXECUTION_PARAMS = {
     "seed": [42],
     "val_size": 5,
     "test_size": 5,
-    "fixed_coefficients": {"AffiliatesCPA_spend": 7000.0},
+    "fixed_coefficients": {"AffiliatesCPA_spend": 6952.199400},
     "fixed_intercept": 843.66,
 }
 

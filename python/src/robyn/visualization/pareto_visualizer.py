@@ -59,7 +59,7 @@ class ParetoVisualizer(BaseVisualizer):
         baseline_variables = []
         # Level 1: Include intercept variables
         if baseline_level >= 1:
-            baseline_variables.extend(["(Intercept)", "intercept"])
+            baseline_variables.extend(["intercept"])
         # Level 2: Include trend variables
         if baseline_level >= 2:
             baseline_variables.append("trend")

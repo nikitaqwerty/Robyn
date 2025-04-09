@@ -243,17 +243,17 @@ class PlotDataGenerator:
             .reset_index()
         )
 
-        if "(Intercept)" not in xDecompVec.columns:
-            xDecompVec["(Intercept)"] = 0
+        if "intercept" not in xDecompVec.columns:
+            xDecompVec["intercept"] = 0
 
         xDecompVec = xDecompVec[
-            ["sol_id", "(Intercept)"]
+            ["sol_id", "intercept"]
             + [col for col in col_order if col not in ["ds", "dep_var"]]
         ]
-        intercept = xDecompVec["(Intercept)"].values[0]
+        intercept = xDecompVec["intercept"].values[0]
 
         scurved = dt_transformDecomp.drop(columns=["ds", "dep_var"])
-        coefs = xDecompVec.drop(columns=["sol_id", "(Intercept)"])
+        coefs = xDecompVec.drop(columns=["sol_id", "intercept"])
 
         scurved = scurved.apply(pd.to_numeric, errors="coerce")
         coefs = coefs.apply(pd.to_numeric, errors="coerce")
@@ -600,7 +600,7 @@ class PlotDataGenerator:
         rollingWindow = range(start_idx, end_idx + 1)
 
         # Rest of your function remains the same
-        self.logger.info(
+        self.logger.debug(
             "Calculating saturated dataframes with carryover and immediate parts"
         )
         hypParamSam = result_hyp_param[result_hyp_param["sol_id"] == sol_id]
