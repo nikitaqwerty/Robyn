@@ -120,6 +120,20 @@ def create_ridge_model_rpy2(
                     # Prepare the reduced X with only columns to be fitted
                     X_fit = X[:, fit_cols]
 
+                    # Subset the constraints to match only the columns being fitted
+                    lower_limits_fit = None
+                    upper_limits_fit = None
+                    penalty_factor_fit = None
+
+                    if lower_limits is not None:
+                        lower_limits_fit = [lower_limits[i] for i in fit_cols]
+
+                    if upper_limits is not None:
+                        upper_limits_fit = [upper_limits[i] for i in fit_cols]
+
+                    if penalty_factor is not None:
+                        penalty_factor_fit = [penalty_factor[i] for i in fit_cols]
+
                     # Convert Python objects to R
                     with localconverter(ro.default_converter + numpy2ri.converter):
                         ro.r.assign("X_r", X_fit)
@@ -127,17 +141,25 @@ def create_ridge_model_rpy2(
                         ro.r.assign("lambda_value", self.lambda_value)
                         ro.r.assign(
                             "lower_limits_r",
-                            lower_limits if lower_limits is not None else ro.r("NULL"),
+                            (
+                                lower_limits_fit
+                                if lower_limits_fit is not None
+                                else ro.r("NULL")
+                            ),
                         )
                         ro.r.assign(
                             "upper_limits_r",
-                            upper_limits if upper_limits is not None else ro.r("NULL"),
+                            (
+                                upper_limits_fit
+                                if upper_limits_fit is not None
+                                else ro.r("NULL")
+                            ),
                         )
                         ro.r.assign(
                             "penalty_factor_r",
                             (
-                                penalty_factor
-                                if penalty_factor is not None
+                                penalty_factor_fit
+                                if penalty_factor_fit is not None
                                 else ro.r("NULL")
                             ),
                         )
