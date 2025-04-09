@@ -12,7 +12,8 @@ def create_ridge_model_rpy2(
     intercept=True,
     intercept_sign="non_negative",
     penalty_factor=None,
-    fixed_coefficients=None,  # New parameter for fixed coefficients
+    fixed_coefficients=None,  # Parameter for fixed coefficients
+    fixed_intercept=None,  # New parameter for fixed intercept
 ):
     """Create a Ridge regression model using rpy2 to access glmnet.
 
@@ -27,6 +28,7 @@ def create_ridge_model_rpy2(
         intercept_sign: Sign constraint for intercept ("non_negative" or None)
         penalty_factor: Penalty factors for each coefficient
         fixed_coefficients: List of fixed coefficient values (None for coefficients to be fitted)
+        fixed_intercept: Fixed value for intercept (None to fit the intercept)
 
     Returns:
         A Ridge regression model using rpy2 to access glmnet.
@@ -70,10 +72,20 @@ def create_ridge_model_rpy2(
             self.full_coef_ = None  # Add this to store full coefficient array
             self.df_int = 1  # Initialize to 1
             self.fixed_coefficients = fixed_coefficients  # Store fixed coefficients
+            self.fixed_intercept = fixed_intercept  # Store fixed intercept
 
         def fit(self, X, y):
             X = np.asarray(X)
             y = np.asarray(y)
+
+            # If fixed intercept is provided, adjust target and fit without intercept
+            if self.fixed_intercept is not None:
+                y_adjusted = y.copy() - self.fixed_intercept
+                self.fit_intercept = False  # Force fit without intercept
+                self.intercept_ = self.fixed_intercept  # Use the fixed value
+                self.df_int = 0  # No degrees of freedom for intercept
+            else:
+                y_adjusted = y.copy()
 
             # Handle fixed coefficients
             fixed_cols = []  # Indices of columns with fixed coefficients
@@ -102,7 +114,6 @@ def create_ridge_model_rpy2(
 
                 if fixed_cols:  # If we have fixed coefficients
                     # Adjust y by subtracting the contribution of fixed coefficients
-                    y_adjusted = y.copy()
                     X_fixed = X[:, fixed_cols]
                     y_adjusted = y_adjusted - np.dot(X_fixed, fixed_values)
 
@@ -131,9 +142,14 @@ def create_ridge_model_rpy2(
                             ),
                         )
 
-                        # First attempt: Fit with intercept on reduced data
+                        # Set intercept parameter based on fixed_intercept
+                        use_intercept = (
+                            self.fixed_intercept is None and self.fit_intercept
+                        )
+
+                        # First attempt: Fit with or without intercept based on settings
                         r_code = """
-                        # First fit with intercept
+                        # Fit model
                         r_model <<- glmnet(
                             x = X_r,
                             y = y_r,
@@ -144,15 +160,21 @@ def create_ridge_model_rpy2(
                             upper.limits = upper_limits_r,
                             type.measure = "mse",
                             penalty.factor = penalty_factor_r,
-                            intercept = TRUE
+                            intercept = %s
                         )
                         coef_values <<- as.numeric(coef(r_model, s = lambda_value))
-                        """
+                        """ % (
+                            "TRUE" if use_intercept else "FALSE"
+                        )
                         ro.r(r_code)
 
-                        # Check intercept sign constraint
+                        # Check intercept sign constraint if we're fitting the intercept
                         coef_array = np.array(ro.r["coef_values"])
-                        if self.intercept_sign == "non_negative" and coef_array[0] < 0:
+                        if (
+                            use_intercept
+                            and self.intercept_sign == "non_negative"
+                            and coef_array[0] < 0
+                        ):
                             # Second attempt: Refit without intercept
                             r_code = """
                             # Refit without intercept
@@ -174,16 +196,18 @@ def create_ridge_model_rpy2(
                             coef_array = np.array(ro.r["coef_values"])
                             self.fit_intercept = False
                             self.df_int = 0  # Set df_int to 0 when intercept is dropped
-                        else:
+                        elif use_intercept:
                             self.df_int = 1  # Keep df_int as 1 when intercept is kept
 
                         # Store model and coefficients
                         self.fitted_model = ro.r["r_model"]
-                        if self.fit_intercept:
-                            self.intercept_ = float(coef_array[0])
+                        if use_intercept:
+                            if self.fixed_intercept is None:
+                                self.intercept_ = float(coef_array[0])
                             fitted_coef = coef_array[1:]
                         else:
-                            self.intercept_ = 0.0
+                            if self.fixed_intercept is None:
+                                self.intercept_ = 0.0
                             fitted_coef = coef_array[1:]
 
                         # Combine fitted and fixed coefficients
@@ -201,13 +225,14 @@ def create_ridge_model_rpy2(
                 else:
                     # If all coefficients are fixed, no need to fit
                     self.coef_ = np.array(self.fixed_coefficients)
-                    self.intercept_ = 0.0  # No intercept in this case
+                    if self.fixed_intercept is None:
+                        self.intercept_ = 0.0  # No intercept in this case
                     self.full_coef_ = np.concatenate([[self.intercept_], self.coef_])
 
                     # Create a dummy model for compatibility
                     with localconverter(ro.default_converter + numpy2ri.converter):
                         ro.r.assign("X_r", X)
-                        ro.r.assign("y_r", y)
+                        ro.r.assign("y_r", y_adjusted)
                         ro.r.assign("lambda_value", self.lambda_value)
                         r_code = """
                         # Create a dummy model
@@ -228,7 +253,7 @@ def create_ridge_model_rpy2(
                 # Original fitting logic if no fixed coefficients
                 with localconverter(ro.default_converter + numpy2ri.converter):
                     ro.r.assign("X_r", X)
-                    ro.r.assign("y_r", y)
+                    ro.r.assign("y_r", y_adjusted)
                     ro.r.assign("lambda_value", self.lambda_value)
                     ro.r.assign(
                         "lower_limits_r",
@@ -243,9 +268,12 @@ def create_ridge_model_rpy2(
                         penalty_factor if penalty_factor is not None else ro.r("NULL"),
                     )
 
-                    # First attempt: Fit with intercept
+                    # Set intercept parameter based on fixed_intercept
+                    use_intercept = self.fixed_intercept is None and self.fit_intercept
+
+                    # First attempt: Fit with or without intercept based on settings
                     r_code = """
-                    # First fit with intercept
+                    # Fit model
                     r_model <<- glmnet(
                         x = X_r,
                         y = y_r,
@@ -256,15 +284,21 @@ def create_ridge_model_rpy2(
                         upper.limits = upper_limits_r,
                         type.measure = "mse",
                         penalty.factor = penalty_factor_r,
-                        intercept = TRUE
+                        intercept = %s
                     )
                     coef_values <<- as.numeric(coef(r_model, s = lambda_value))
-                    """
+                    """ % (
+                        "TRUE" if use_intercept else "FALSE"
+                    )
                     ro.r(r_code)
 
-                    # Check intercept sign constraint
+                    # Check intercept sign constraint if we're fitting the intercept
                     coef_array = np.array(ro.r["coef_values"])
-                    if self.intercept_sign == "non_negative" and coef_array[0] < 0:
+                    if (
+                        use_intercept
+                        and self.intercept_sign == "non_negative"
+                        and coef_array[0] < 0
+                    ):
                         # Second attempt: Refit without intercept
                         r_code = """
                         # Refit without intercept
@@ -286,34 +320,42 @@ def create_ridge_model_rpy2(
                         coef_array = np.array(ro.r["coef_values"])
                         self.fit_intercept = False
                         self.df_int = 0  # Set df_int to 0 when intercept is dropped
-                    else:
+                    elif use_intercept:
                         self.df_int = 1  # Keep df_int as 1 when intercept is kept
 
                     # Store model and coefficients
                     self.fitted_model = ro.r["r_model"]
-                    if self.fit_intercept:
-                        self.intercept_ = float(coef_array[0])
+                    if use_intercept:
+                        if self.fixed_intercept is None:
+                            self.intercept_ = float(coef_array[0])
                         self.coef_ = coef_array[1:]
                         self.full_coef_ = (
                             coef_array  # Store full array including intercept
                         )
                     else:
-                        self.intercept_ = 0.0
+                        if self.fixed_intercept is None:
+                            self.intercept_ = 0.0
                         self.coef_ = coef_array[1:]
-                        # Create full coefficient array with 0 intercept
-                        self.full_coef_ = np.concatenate([[0.0], self.coef_])
+                        # Create full coefficient array with intercept
+                        self.full_coef_ = np.concatenate(
+                            [[self.intercept_], self.coef_]
+                        )
 
             return self
 
         def predict(self, X):
             X = np.asarray(X)
 
-            if X.shape[0] < 1000 or self.fixed_coefficients is not None:
-                # Always use direct computation when fixed coefficients are provided
+            if (
+                X.shape[0] < 1000
+                or self.fixed_coefficients is not None
+                or self.fixed_intercept is not None
+            ):
+                # Always use direct computation when fixed coefficients/intercept are provided
                 predictions = np.dot(X, self.coef_) + self.intercept_
                 self.logger.debug(f"Using direct computation")
             else:
-                # For larger matrices without fixed coefficients, use R but check cache first
+                # For larger matrices without fixed values, use R but check cache first
                 X_hash = hash(X.tobytes())
                 if X_hash in self._prediction_cache:
                     return self._prediction_cache[X_hash]
