@@ -1,9 +1,6 @@
 import logging
 import numpy as np
 
-import numpy as np
-import logging
-
 
 def create_ridge_model_rpy2(
     lambda_value,
