@@ -339,6 +339,18 @@ class RidgeModelEvaluator:
 
         sol_id = f"{trial}_{iter_ng + 1}_1"
 
+        # Convert fixed_coefficients from dictionary to list format expected by create_ridge_model_rpy2
+        # This will align fixed coefficients with X.columns
+        formatted_fixed_coefficients = None
+        if fixed_coefficients is not None:
+            formatted_fixed_coefficients = [
+                fixed_coefficients.get(col, None) for col in X.columns
+            ]
+            self.logger.debug(f"Fixed coefficients: {fixed_coefficients}")
+            self.logger.debug(
+                f"Formatted fixed coefficients: {formatted_fixed_coefficients}"
+            )
+
         # Modified data splitting logic with fixed validation and test sizes
         train_size = params.get("train_size", 1.0) if ts_validation else 1.0
 
@@ -551,6 +563,9 @@ class RidgeModelEvaluator:
                         "lambda_hp": lambda_hp,
                         "lambda_scaled": lambda_,  # Using lambda_ instead of lambda_scaled
                         "penalty_factor": penalty_factor,
+                        "fixed_coefficients": fixed_coefficients,  # Log the original fixed coefficients
+                        "formatted_fixed_coefficients": formatted_fixed_coefficients,  # Log the formatted fixed coefficients
+                        "fixed_intercept": fixed_intercept,  # Log the fixed intercept
                     },
                 },
                 indent=2,
@@ -559,7 +574,7 @@ class RidgeModelEvaluator:
         # Scale inputs for model
         N = len(x_norm)
 
-        # Create and fit the model
+        # Create and fit the model with formatted fixed coefficients and fixed intercept
         model = create_ridge_model_rpy2(
             lambda_value=lambda_,
             n_samples=N,
@@ -570,8 +585,10 @@ class RidgeModelEvaluator:
             lower_limits=lower_limits,
             upper_limits=upper_limits,
             penalty_factor=penalty_factor,
+            fixed_coefficients=formatted_fixed_coefficients,  # Pass the formatted fixed coefficients
+            fixed_intercept=fixed_intercept,  # Pass the fixed intercept
         )
-        # Log data shapes and stats before fitting
+
         self.logger.debug(
             json.dumps(
                 {

@@ -100,6 +100,8 @@ MODEL_EXECUTION_PARAMS = {
     "seed": [42],
     "val_size": 5,
     "test_size": 5,
+    "fixed_coefficients": {"AffiliatesCPA_spend": 7000.0},
+    "fixed_intercept": 843.66,
 }
 
 # Clustering parameters
@@ -254,6 +256,8 @@ def main():
         seed=MODEL_EXECUTION_PARAMS["seed"],
         val_size=MODEL_EXECUTION_PARAMS["val_size"],
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
+        fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
+        fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
     )
 
     # Display model output summaries
