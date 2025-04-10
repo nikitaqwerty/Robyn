@@ -56,28 +56,33 @@ class OnePager:
         plt.style.use("default")
         sns.set_theme(style="whitegrid", context="paper")
 
-        # Use more aggressive memory-efficient settings
-        dpi_value = 60 if reduced_quality else 100  # Reduced from 72
-        save_dpi = 100 if reduced_quality else 300  # Reduced from 150
+        # Use more memory-balanced settings - too aggressive reduction can cause image corruption
+        dpi_value = 80 if reduced_quality else 120  # Increased minimum DPI
+        save_dpi = 120 if reduced_quality else 300  # Increased minimum save DPI
 
         plt.rcParams.update(
             {
-                "figure.figsize": (16, 20),  # Further reduced size
+                "figure.figsize": (16, 20),
                 "figure.dpi": dpi_value,
                 "savefig.dpi": save_dpi,
-                "font.size": 10,  # Smaller fonts
-                "axes.titlesize": 14,  # Reduced from 16
-                "axes.labelsize": 9,  # Reduced from 10
-                "xtick.labelsize": 8,  # Reduced from 9
-                "ytick.labelsize": 8,  # Reduced from 9
-                "legend.fontsize": 8,  # Reduced from 9
-                "figure.titlesize": 12,  # Reduced from 14
+                "font.size": 10,
+                "axes.titlesize": 14,
+                "axes.labelsize": 9,
+                "xtick.labelsize": 8,
+                "ytick.labelsize": 8,
+                "legend.fontsize": 8,
+                "figure.titlesize": 12,
                 "axes.grid": True,
                 "grid.alpha": 0.3,
                 "axes.spines.top": False,
                 "axes.spines.right": False,
-                "savefig.bbox": "tight",  # Use tight bbox by default
-                "savefig.pad_inches": 0.3,  # Reduced padding
+                "savefig.bbox": "tight",
+                "savefig.pad_inches": 0.3,
+                # Add explicit format settings for better image handling
+                "savefig.format": "png",
+                "savefig.transparent": False,
+                "savefig.facecolor": "white",
+                "savefig.edgecolor": "white",
             }
         )
 
@@ -231,7 +236,7 @@ class OnePager:
             # Add title with larger font and bold
             fig.suptitle(
                 f"MMM Analysis One-Pager for Model: {solution_id}",
-                fontsize=20,  # Reduced from 24
+                fontsize=20,
                 y=0.98,
                 weight="bold",
                 fontfamily="sans-serif",
@@ -243,7 +248,7 @@ class OnePager:
                     0.5,  # Center horizontally
                     0.955,  # Position below title
                     metrics_text,
-                    fontsize=12,  # Reduced from 16
+                    fontsize=12,
                     ha="center",
                     va="top",
                     weight="bold",
@@ -253,7 +258,7 @@ class OnePager:
             # Fallback title with same style
             fig.suptitle(
                 f"MMM Analysis One-Pager for Model: {solution_id}",
-                fontsize=20,  # Reduced from 24
+                fontsize=20,
                 y=0.98,
                 weight="bold",
                 fontfamily="sans-serif",
@@ -421,11 +426,6 @@ class OnePager:
                         va="center",
                     )
 
-                # Force garbage collection after each plot
-                plt.figure().clear()
-                plt.close()
-                gc.collect()
-
             # Clear visualizers to free memory
             del pareto_viz, cluster_viz, response_viz, transfor_viz
             gc.collect()
@@ -441,12 +441,12 @@ class OnePager:
         self,
         solution_ids: Union[str, List[str]] = "all",
         plots: Optional[List[PlotType]] = None,
-        figsize: tuple = (16, 20),  # Further reduced default
+        figsize: tuple = (16, 20),
         save_path: Optional[str] = None,
         top_pareto: bool = False,
-        max_solutions: int = 1,  # Reduced from 5 to 1 to prevent memory issues
-        reduced_quality: bool = True,  # New parameter to control quality vs memory usage
-    ) -> List[plt.Figure]:
+        max_solutions: int = 1,
+        reduced_quality: bool = True,
+    ) -> List[Union[plt.Figure, str]]:
         """Generate separate one-pager for each solution ID with memory optimizations.
 
         Args:
@@ -459,7 +459,7 @@ class OnePager:
             reduced_quality: If True, use lower DPI and image quality to save memory
 
         Returns:
-            List[plt.Figure]: List of generated figures, one per solution
+            List[Union[plt.Figure, str]]: List of generated figures or filenames
         """
         # Explicitly clean up before starting
         plt.close("all")
@@ -484,10 +484,10 @@ class OnePager:
         # Use default plots if none provided
         plots = plots or self.default_plots
 
-        # Memory optimization: Limit number of plots if memory is a concern
-        if reduced_quality and len(plots) > 10:
+        # Reduce number of plots for memory optimization if needed
+        if reduced_quality and len(plots) > 6:
             logger.warning("Reducing number of plots to save memory")
-            plots = plots[:10]  # Keep only first 10 plots
+            plots = plots[:6]  # Keep only first 8 plots to avoid memory issues
 
         # Handle solution IDs based on top_pareto parameter
         if top_pareto:
@@ -590,30 +590,64 @@ class OnePager:
                     # Add title and metrics
                     self._add_title_and_metrics(fig, solution_id)
 
+                    # Ensure the figure is properly drawn before saving
+                    fig.canvas.draw()
+
                     if save_path:
                         save_file = os.path.join(
                             save_path, f"onepager_solution_{solution_id}.png"
                         )
-                        # Use lower quality for saving to reduce file size and memory usage
-                        dpi = (
-                            80 if reduced_quality else 150
-                        )  # Even lower dpi for saving
-                        fig.savefig(
-                            save_file,
-                            bbox_inches="tight",
-                            pad_inches=0.3,
-                            dpi=dpi,
-                        )
-                        logger.debug(f"Saved figure to {save_file}")
 
-                    # Store the figure only if needed for return
-                    if not save_path:
-                        figures.append(fig)
-                    else:
-                        # Close figure after saving to free memory
-                        plt.close(fig)
-                        # Just store the filename if saved to disk
+                        # FIXED: Implement robust saving with error handling
+                        try:
+                            # Define a safer approach to saving
+                            dpi = (
+                                120 if reduced_quality else 200
+                            )  # Increased minimum DPI
+
+                            # Use a more explicit approach to saving
+                            fig.savefig(
+                                save_file,
+                                format="png",  # Explicitly specify format
+                                bbox_inches="tight",
+                                pad_inches=0.3,
+                                dpi=dpi,
+                                facecolor="white",  # Ensure white background
+                                edgecolor="white",
+                                transparent=False,
+                            )
+
+                            # Verify file was created and has size > 0
+                            if (
+                                not os.path.exists(save_file)
+                                or os.path.getsize(save_file) == 0
+                            ):
+                                raise IOError(
+                                    f"Failed to create valid file: {save_file}"
+                                )
+
+                            logger.debug(f"Saved figure to {save_file}")
+                        except Exception as save_error:
+                            logger.error(f"Error saving figure: {str(save_error)}")
+
+                            # Fallback to simpler save method if the first method fails
+                            try:
+                                plt.savefig(save_file, dpi=dpi)
+                                logger.debug(f"Saved figure using fallback method")
+                            except Exception as fallback_error:
+                                logger.error(
+                                    f"Fallback save also failed: {str(fallback_error)}"
+                                )
+                                raise
+
+                        # Store the filename if saved to disk
                         figures.append(save_file)
+                    else:
+                        # Store the figure only if needed for return
+                        figures.append(fig)
+
+                    # Close figure after successful handling to free memory
+                    plt.close(fig)
 
                     # Force garbage collection after each solution
                     gc.collect()
