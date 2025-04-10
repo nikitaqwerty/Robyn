@@ -485,9 +485,9 @@ class OnePager:
         plots = plots or self.default_plots
 
         # Reduce number of plots for memory optimization if needed
-        if reduced_quality and len(plots) > 6:
+        if reduced_quality and len(plots) > 8:
             logger.warning("Reducing number of plots to save memory")
-            plots = plots[:6]  # Keep only first 8 plots to avoid memory issues
+            plots = plots[:8]  # Keep only first 8 plots to avoid memory issues
 
         # Handle solution IDs based on top_pareto parameter
         if top_pareto:
