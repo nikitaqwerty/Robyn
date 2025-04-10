@@ -401,9 +401,7 @@ def main():
 
     # Select model for budget allocation
     select_model = (
-        pareto_result.result_hyp_param.sort_values("mae", ascending=False)
-        .iloc[0]
-        .sol_id
+        pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0].sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
 
@@ -411,8 +409,9 @@ def main():
         pareto_result, cluster_results, hyperparameters, mmm_data, holidays_data
     ).generate_one_pager(
         solution_ids=select_model,
-        figsize=(20, 40),
+        figsize=(16, 20),
         save_path=str(WORKING_DIR),
+        reduced_quality=True,
     )
 
     # Run budget allocation
