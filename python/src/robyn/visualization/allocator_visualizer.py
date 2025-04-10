@@ -817,7 +817,6 @@ class AllocatorVisualizer(BaseVisualizer):
             ],
         )
 
-        # Update axes without titles (remove title_text from both)
         fig.update_xaxes(
             tickfont={"size": 8},
             showgrid=True,
@@ -837,6 +836,34 @@ class AllocatorVisualizer(BaseVisualizer):
             zerolinewidth=1,
             zerolinecolor="rgba(128, 128, 128, 0.2)",
         )
+
+        # Add bold channel names as annotations beneath each subplot
+        unique_labels = list(plotDT_scurve["constr_label"].unique())
+        for i, label in enumerate(unique_labels, start=1):
+            # Retrieve the channel name corresponding to this subplot label
+            channel = constr_labels[constr_labels["constr_label"] == label][
+                "channel"
+            ].iloc[0]
+            # Determine axis keys (first subplot keys do not have a number)
+            xaxis_key = "xaxis" if i == 1 else f"xaxis{i}"
+            yaxis_key = "yaxis" if i == 1 else f"yaxis{i}"
+            # Get the domain for the subplot
+            x_domain = fig.layout[xaxis_key].domain
+            y_domain = fig.layout[yaxis_key].domain
+            # Calculate the horizontal midpoint and a position just below the subplot
+            x_mid = (x_domain[0] + x_domain[1]) / 2
+            y_pos = y_domain[0] - 0.08 * (y_domain[1] - y_domain[0])
+            fig.add_annotation(
+                x=x_mid,
+                y=y_pos,
+                xref="paper",
+                yref="paper",
+                text=f"<b>{channel}</b>",
+                showarrow=False,
+                font=dict(size=10),
+                xanchor="center",
+                yanchor="top",
+            )
 
         return fig
 
