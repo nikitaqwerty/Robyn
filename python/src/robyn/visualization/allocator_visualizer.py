@@ -885,6 +885,18 @@ class AllocatorVisualizer(BaseVisualizer):
             plotDT_scurve = self.eval_list["plotDT_scurve"]
             mainPoints = self.eval_list["mainPoints"]
 
+            # Add channels section header to legend (dummy trace)
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(size=0, color="rgba(0,0,0,0)"),
+                    name="<b>Channels</b>",
+                    showlegend=True,
+                )
+            )
+
             # Process channels
             for i, channel in enumerate(self.dt_optim_out["channels"]):
                 # Filter data for this channel
@@ -909,9 +921,8 @@ class AllocatorVisualizer(BaseVisualizer):
                     go.Scatter(
                         x=historical_data["spend"],
                         y=historical_data["total_response"],
-                        name=channel,
+                        name=channel,  # No prefix needed
                         line=dict(color=colors[i % len(colors)], width=2),
-                        legendgroup=channel,
                         showlegend=True,
                     )
                 )
@@ -970,7 +981,6 @@ class AllocatorVisualizer(BaseVisualizer):
                             line=dict(
                                 color=colors[i % len(colors)], width=2, dash="dot"
                             ),
-                            legendgroup=channel,
                             showlegend=False,
                         )
                     )
@@ -984,13 +994,50 @@ class AllocatorVisualizer(BaseVisualizer):
                             line=dict(
                                 color=colors[i % len(colors)], width=2, dash="dot"
                             ),
-                            legendgroup=channel,
                             showlegend=False,
                         )
                     )
 
-                # Add points for each scenario except Initial
-                for scenario_idx, scenario_type in enumerate(levs1[1:], 1):
+            # Add scenarios section header to legend (dummy trace)
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(size=0, color="rgba(0,0,0,0)"),
+                    name="<b>Scenarios</b>",
+                    showlegend=True,
+                )
+            )
+
+            # Add scenario points - group together by scenario rather than by channel
+            for scenario_idx, scenario_type in enumerate(levs1[1:], 1):
+                # Only add to legend once per scenario
+                fig.add_trace(
+                    go.Scatter(
+                        x=[None],  # Empty trace for legend only
+                        y=[None],
+                        mode="markers",
+                        marker=dict(
+                            color="black",  # Use black for legend item
+                            size=10,
+                            symbol=scenario_markers[
+                                (scenario_idx - 1) % len(scenario_markers)
+                            ],
+                            line=dict(
+                                color=scenario_colors[
+                                    (scenario_idx - 1) % len(scenario_colors)
+                                ],
+                                width=2,
+                            ),
+                        ),
+                        name=scenario_type,
+                        showlegend=True,
+                    )
+                )
+
+                # Add the actual scenario points for each channel (but don't add to legend)
+                for i, channel in enumerate(self.dt_optim_out["channels"]):
                     scenario_points = mainPoints[
                         (mainPoints["channel"] == channel)
                         & (mainPoints["type"] == scenario_type)
@@ -1004,7 +1051,7 @@ class AllocatorVisualizer(BaseVisualizer):
                                 mode="markers",
                                 marker=dict(
                                     color=colors[i % len(colors)],
-                                    size=12,
+                                    size=10,
                                     symbol=scenario_markers[
                                         (scenario_idx - 1) % len(scenario_markers)
                                     ],
@@ -1015,13 +1062,21 @@ class AllocatorVisualizer(BaseVisualizer):
                                         width=2,
                                     ),
                                 ),
-                                name=scenario_type,
-                                legendgroup=scenario_type,
-                                showlegend=(
-                                    i == 0
-                                ),  # Show in legend only for first channel
+                                showlegend=False,  # Don't show in legend
                             )
                         )
+
+            # Add information section header to legend (dummy trace)
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="markers",
+                    marker=dict(size=0, color="rgba(0,0,0,0)"),
+                    name="<b>Information</b>",
+                    showlegend=True,
+                )
+            )
 
             # Add a trace for the projection line legend
             fig.add_trace(
@@ -1030,7 +1085,7 @@ class AllocatorVisualizer(BaseVisualizer):
                     y=[None],
                     mode="lines",
                     line=dict(color="black", width=2, dash="dot"),
-                    name="Projection (up to 3x initial spend)",
+                    name="Projection (3x spend)",
                     showlegend=True,
                 )
             )
@@ -1067,21 +1122,25 @@ class AllocatorVisualizer(BaseVisualizer):
                 },
                 xaxis_title="Spend",
                 yaxis_title=f"Response [{self.budget_allocator.mmm_data.mmmdata_spec.dep_var_type}]",
+                # Use a vertical legend on the right side with organized sections
                 legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1,
+                    orientation="v",  # Vertical orientation
+                    yanchor="top",
+                    y=1.0,
+                    xanchor="left",
+                    x=1.02,
                     font=dict(size=9),
+                    itemsizing="constant",  # Make all legend icons the same size
                 ),
                 height=600,
                 width=1000,
                 template="plotly_white",
-                margin=dict(t=100, b=80, l=120, r=50),
+                margin=dict(
+                    t=100, b=80, l=120, r=170
+                ),  # Increased right margin for the legend
             )
 
-            # Format axis labels with commas
+            # Format axis labels with commas and limit x-axis to max_projection_spend
             fig.update_xaxes(
                 tickformat=",",
                 showgrid=True,
@@ -1090,6 +1149,10 @@ class AllocatorVisualizer(BaseVisualizer):
                 zeroline=True,
                 zerolinewidth=1,
                 zerolinecolor="rgba(128, 128, 128, 0.2)",
+                range=[
+                    0,
+                    max_projection_spend,
+                ],  # Set X-axis limit to max_projection_spend
             )
 
             fig.update_yaxes(
