@@ -500,7 +500,7 @@ def main():
 
     # Create allocation plots
     print("Creating allocation visualizations...")
-    plotter = AllocatorVisualizer(budget_allocator=max_response_allocator)
+    plotter = AllocatorVisualizer(budget_allocator=max_response_allocator, metric="CPA")
 
     plots = plotter.plot_all(display_plots=False, export_location=str(WORKING_DIR))
 

@@ -300,8 +300,8 @@ class AllocatorVisualizer(BaseVisualizer):
             formatted += pos
         return formatted
 
-    def _plot_allocation_comparison(self) -> Dict[str, Any]:
-        """Create response and spend comparison plot."""
+    def _plot_allocation_comparison(self) -> plt.Figure:
+        """Create response and spend comparison plot as a matrix of heatmaps."""
 
         # Create the base dataframe for plotting
         df_plots = pd.DataFrame()
@@ -336,78 +336,62 @@ class AllocatorVisualizer(BaseVisualizer):
             }
         ).melt(id_vars=["channel"], var_name="type", value_name="mean_spend")
 
-        # ROI/CPA data
-        metric = "ROAS"  # or "CPA" based on your needs
-        if metric == "ROAS":
-            roi_cpa = pd.DataFrame(
-                {
-                    "channel": self.dt_optim_out["channels"],
-                    "Initial": self.dt_optim_out["initRoiUnit"],
-                    "Bounded": self.dt_optim_out["optmRoiUnit"],
-                    "Unbounded": self.dt_optim_out["optmRoiUnitUnbound"],
-                }
-            ).melt(id_vars=["channel"], var_name="type", value_name="channel_roi")
-        else:
-            roi_cpa = pd.DataFrame(
-                {
-                    "channel": self.dt_optim_out["channels"],
-                    "Initial": self.dt_optim_out["initCpaUnit"],
-                    "Bounded": self.dt_optim_out["optmCpaUnit"],
-                    "Unbounded": self.dt_optim_out["optmCpaUnitUnbound"],
-                }
-            ).melt(id_vars=["channel"], var_name="type", value_name="channel_cpa")
-
-        # Marginal ROI/CPA data
-        if metric == "ROAS":
-            marginal = pd.DataFrame(
-                {
-                    "channel": self.dt_optim_out["channels"],
-                    "Initial": self.dt_optim_out["initResponseMargUnit"],
-                    "Bounded": self.dt_optim_out["optmResponseMargUnit"],
-                    "Unbounded": self.dt_optim_out["optmResponseMargUnitUnbound"],
-                }
-            ).melt(id_vars=["channel"], var_name="type", value_name="marginal_roi")
-        else:
-            marginal = pd.DataFrame(
-                {
-                    "channel": self.dt_optim_out["channels"],
-                    "Initial": 1 / self.dt_optim_out["initResponseMargUnit"],
-                    "Bounded": 1 / self.dt_optim_out["optmResponseMargUnit"],
-                    "Unbounded": 1 / self.dt_optim_out["optmResponseMargUnitUnbound"],
-                }
-            ).melt(id_vars=["channel"], var_name="ROAS type", value_name="marginal_cpa")
+        # Mean response data - Add this to ensure we have response values for metric calculation
+        mean_response = pd.DataFrame(
+            {
+                "channel": self.dt_optim_out["channels"],
+                "Initial": self.dt_optim_out["initResponseUnit"],
+                "Bounded": self.dt_optim_out["optmResponseUnit"],
+                "Unbounded": self.dt_optim_out["optmResponseUnitUnbound"],
+            }
+        ).melt(id_vars=["channel"], var_name="type", value_name="mean_response")
 
         # Combine all dataframes
         df_plots = response_share.merge(spend_share, on=["channel", "type"])
         df_plots = df_plots.merge(mean_spend, on=["channel", "type"])
-        df_plots = df_plots.merge(roi_cpa, on=["channel", "type"])
-        df_plots = df_plots.merge(marginal, on=["channel", "type"])
+        df_plots = df_plots.merge(
+            mean_response, on=["channel", "type"]
+        )  # Add response values
 
-        # Update metrics to match R format with % suffix
+        # Calculate the metric value directly from mean_spend and mean_response
+        # This ensures proper calculation of CPA (spend/response) or ROAS (response/spend)
+        df_plots["metric_value"] = df_plots.apply(
+            lambda x: (
+                (x["mean_response"] / x["mean_spend"] if x["mean_spend"] > 0 else 0)
+                if self.metric == "ROAS"
+                else (
+                    x["mean_spend"] / x["mean_response"]
+                    if x["mean_response"] > 0
+                    else float("inf")
+                )
+            ),
+            axis=1,
+        )
+
+        # Handle infinity values for cleaner visualization
+        df_plots["metric_value"] = df_plots["metric_value"].replace(
+            [np.inf, -np.inf], 1e9
+        )
+
+        # Update metrics to match format - 4 columns with proper metric names
         metrics = [
             "abs.mean\nspend",
             "mean\nspend%",
             "mean\nresponse%",
-            f"mean\n{metric}",
-            f"m{metric}",
+            f"mean\n{self.metric}",
         ]
 
+        # Prepare data for plotting with consistent structure
         plot_data = []
         for metric_name in metrics:
             if metric_name == "abs.mean\nspend":
                 values = df_plots["mean_spend"]
-            elif metric_name == "mean\nspend%":  # Note the % suffix
+            elif metric_name == "mean\nspend%":
                 values = df_plots["spend_share"]
-            elif metric_name == "mean\nresponse%":  # Note the % suffix
+            elif metric_name == "mean\nresponse%":
                 values = df_plots["response_share"]
-            elif metric_name.startswith("mean\n"):
-                values = df_plots[
-                    "channel_roi" if "ROAS" in metric_name else "channel_cpa"
-                ]
-            else:  # mROAS/mCPA calculation
-                values = df_plots[
-                    "marginal_roi" if "ROAS" in metric_name else "marginal_cpa"
-                ]
+            else:  # mean\nROAS or mean\nCPA
+                values = df_plots["metric_value"]
 
             temp_df = pd.DataFrame(
                 {
@@ -426,92 +410,110 @@ class AllocatorVisualizer(BaseVisualizer):
         df_plot_share["values"] = df_plot_share["values"].replace([np.inf, -np.inf], 0)
         df_plot_share["values"] = df_plot_share["values"].clip(upper=1e15)
 
-        # Create labels
+        # Create labels with improved formatting
         df_plot_share["values_label"] = df_plot_share.apply(
             lambda x: (
-                f"{x['values']:,.1f}"
+                f"{x['values']:,.1f}"  # Add comma for thousands
                 if x["metric"] == "abs.mean\nspend"
                 else (
                     f"{x['values']*100:.1f}%"
                     if x["metric"] in ["mean\nspend%", "mean\nresponse%"]
-                    else f"{x['values']:.2f}"
+                    else (
+                        f"{int(round(x['values']))}"  # Round CPA to integer
+                        if self.metric == "CPA"
+                        and x["metric"] == f"mean\n{self.metric}"
+                        else f"{x['values']:.2f}"  # 2 decimal places for ROAS
+                    )
                 )
             ),
             axis=1,
         )
 
-        # Start the plotting changes here
+        # Start the plotting with the improved approach
         try:
-            # Create figure with three subplots
-            fig, axes = plt.subplots(1, 3, figsize=(10, 6))
+            # Create figure with GridSpec for precise layout control
+            fig = plt.figure(figsize=(15, 6))
+            gs = fig.add_gridspec(1, 3, wspace=0)  # Zero spacing between columns
+            axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
 
-            # Define color schemes for each type
+            # Define color schemes for each scenario
             color_schemes = {
-                "Initial": sns.light_palette("#C0C0C0", as_cmap=True),
-                "Bounded": sns.light_palette("#6495ED", as_cmap=True),
-                "Unbounded": sns.light_palette("#efb400", as_cmap=True),
+                "Initial": sns.light_palette("#C0C0C0", as_cmap=True),  # Silver/Gray
+                "Bounded": sns.light_palette("#6495ED", as_cmap=True),  # Blue
+                "Unbounded": sns.light_palette("#efb400", as_cmap=True),  # Gold
             }
 
-            # Plot for each type (Initial, Bounded, Unbounded)
-            for i, type_name in enumerate(["Initial", "Bounded", "Unbounded"]):
-                type_data = df_plot_share[df_plot_share["type"] == type_name]
+            # Plot for each scenario (Initial, Bounded, Unbounded)
+            for i, scenario in enumerate(["Initial", "Bounded", "Unbounded"]):
+                scenario_data = df_plot_share[df_plot_share["type"] == scenario]
 
-                # Create pivot table with correct metric order
-                plot_data = type_data.pivot(
+                # Create pivot table
+                pivot_data = scenario_data.pivot(
                     index="channel", columns="metric", values="values"
-                )[
-                    metrics
-                ]  # Explicitly specify metric order
-
-                # Format display values
-                display_data = plot_data.copy()
-                display_data["abs.mean\nspend"] = display_data["abs.mean\nspend"].apply(
-                    lambda x: f"{x/1000:.0f}K"
                 )
-                for col in metrics[1:]:
-                    display_data[col] = display_data[col].apply(
-                        lambda x: (f"{x*100:.1f}%" if col.endswith("%") else f"{x:.2f}")
-                    )
+                pivot_data = pivot_data[metrics]  # Reorder columns
 
-                # Normalize data for color intensity
-                norm_data = plot_data.copy()
+                # Create display values
+                display_data = scenario_data.pivot(
+                    index="channel", columns="metric", values="values_label"
+                )
+                display_data = display_data[metrics]  # Reorder columns
+
+                # Normalize each column for color intensity
+                norm_data = pivot_data.copy()
                 for col in metrics:
                     col_values = norm_data[col].values
-                    if col_values.any():
-                        min_val = col_values.min()
-                        max_val = col_values.max()
-                        if max_val > min_val:
-                            norm_data[col] = (col_values - min_val) / (
-                                max_val - min_val
-                            )
-                        else:
-                            norm_data[col] = 0
+                    if len(col_values) > 0 and col_values.max() > col_values.min():
+                        norm_data[col] = (col_values - col_values.min()) / (
+                            col_values.max() - col_values.min()
+                        )
+                    else:
+                        norm_data[col] = 0
 
                 # Create heatmap
                 sns.heatmap(
                     norm_data,
                     ax=axes[i],
-                    cmap=color_schemes[type_name],
+                    cmap=color_schemes[scenario],
                     annot=display_data.values,
                     fmt="",
                     cbar=False,
-                    annot_kws={"fontsize": 8},
+                    annot_kws={"fontsize": 7, "va": "center"},
+                    linewidths=0.5,  # Add cell borders for better readability
                 )
 
                 # Customize axis
-                axes[i].set_title(type_name, fontsize=8)
-                axes[i].set_ylabel("Paid Media" if i == 0 else "", fontsize=8)
-                axes[i].tick_params(axis="both", labelsize=8)
+                axes[i].set_title(scenario, fontsize=9, pad=5)
+                if i == 0:
+                    axes[i].set_ylabel("Paid Media", fontsize=9)
+                else:
+                    axes[i].set_ylabel("")
+                    axes[i].set_yticks([])  # Hide y ticks for non-first plots
+
                 axes[i].set_xlabel("")  # Remove the "metric" label
 
                 # Rotate x-axis labels
                 axes[i].set_xticklabels(
-                    axes[i].get_xticklabels(), rotation=45, horizontalalignment="right"
+                    axes[i].get_xticklabels(),
+                    rotation=45,
+                    horizontalalignment="right",
+                    fontsize=7,
                 )
 
+                # Add thick border between heatmaps (except for the last one)
+                if i < 2:  # 2 is the last index (0, 1, 2)
+                    axes[i].spines["right"].set_visible(True)
+                    axes[i].spines["right"].set_color("black")
+                    axes[i].spines["right"].set_linewidth(2)
+
             plt.suptitle(
-                f"Budget Allocation per Paid Media Variable per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}*",
+                f"Budget Allocation per Paid Media Variable per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}",
+                fontsize=10,
+                y=0.98,
             )
+
+            # Adjust layout to make room for the title while maintaining zero spacing
+            plt.subplots_adjust(top=0.85, wspace=0)
             plt.tight_layout(pad=2.0)
 
             # Add this line to prevent double display
@@ -520,9 +522,7 @@ class AllocatorVisualizer(BaseVisualizer):
             return fig
 
         except Exception as e:
-            self.logger.error(
-                "Failed to create response spend comparison plot: %s", str(e)
-            )
+            self.logger.error("Failed to create allocation comparison plot: %s", str(e))
             raise
 
     def _plot_response_curves(self):
@@ -840,6 +840,274 @@ class AllocatorVisualizer(BaseVisualizer):
 
         return fig
 
+    def _plot_combined_response_curves(
+        self, max_projection_spend: float = 50000000
+    ) -> go.Figure:
+        """
+        Plot response curves for all channels on a single plot for comparison.
+
+        Args:
+            max_projection_spend: Maximum spend to project for any channel (default: 50,000,000)
+        """
+        logger.info("Creating combined response curves plot")
+        try:
+            # Create a plotly figure
+            fig = go.Figure()
+
+            # Set up colors for channels and scenarios
+            # Using Plotly's default color sequence
+            colors = [
+                "#1f77b4",
+                "#ff7f0e",
+                "#2ca02c",
+                "#d62728",
+                "#9467bd",
+                "#8c564b",
+                "#e377c2",
+                "#7f7f7f",
+                "#bcbd22",
+                "#17becf",
+            ]
+
+            scenario_markers = [
+                "circle",
+                "square",
+                "triangle-up",
+            ]  # Marker shapes for scenarios
+
+            # Get scenarios from resp_metric
+            levs1 = self.resp_metric["type"].unique()
+            bound_mult = self.dt_optim_out["unconstr_mult"].iloc[0]
+
+            scenario_colors = ["gray", "#4682B4", "#DAA520"]  # Match existing colors
+
+            # Get response curve data
+            plotDT_scurve = self.eval_list["plotDT_scurve"]
+            mainPoints = self.eval_list["mainPoints"]
+
+            # Process channels
+            for i, channel in enumerate(self.dt_optim_out["channels"]):
+                # Filter data for this channel
+                channel_data = plotDT_scurve[plotDT_scurve["channel"] == channel]
+
+                # Get initial spend for this channel and mean carryover
+                initial_spend = self.dt_optim_out["initSpendUnit"].iloc[i]
+                carryover = (
+                    channel_data["mean_carryover"].iloc[0]
+                    if "mean_carryover" in channel_data.columns
+                    else 0
+                )
+
+                # Calculate projection limit
+                projection_limit = min(initial_spend * 3, max_projection_spend)
+
+                # Filter data for historical part (up to initial spend)
+                historical_data = channel_data[channel_data["spend"] <= initial_spend]
+
+                # Add trace for historical curve (solid line)
+                fig.add_trace(
+                    go.Scatter(
+                        x=historical_data["spend"],
+                        y=historical_data["total_response"],
+                        name=channel,
+                        line=dict(color=colors[i % len(colors)], width=2),
+                        legendgroup=channel,
+                        showlegend=True,
+                    )
+                )
+
+                # Add carryover area if data is available
+                if carryover > 0:
+                    carryover_data = channel_data[channel_data["spend"] <= carryover]
+                    if not carryover_data.empty:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=carryover_data["spend"],
+                                y=carryover_data["total_response"],
+                                fill="tozeroy",
+                                fillcolor="rgba(128, 128, 128, 0.4)",
+                                line=dict(width=0),
+                                showlegend=False,
+                                hoverinfo="none",
+                            )
+                        )
+
+                # Project additional data if needed
+                projection_data = channel_data[
+                    (channel_data["spend"] > initial_spend)
+                    & (channel_data["spend"] <= projection_limit)
+                ]
+
+                if (
+                    projection_data.empty
+                    and max(channel_data["spend"]) < projection_limit
+                ):
+                    # Need to extrapolate - use existing points to estimate extended curve
+                    last_points = channel_data.nlargest(5, "spend")
+                    max_response = last_points["total_response"].max()
+
+                    # Create projection data points
+                    projection_spend = np.linspace(
+                        max(channel_data["spend"]), projection_limit, 50
+                    )
+
+                    # Simple saturation curve extrapolation (Hill-like behavior)
+                    alpha = 0.7  # Typical value from Hill parameters
+                    gamma = initial_spend  # Use initial spend as inflection point
+
+                    # Hill transformation for extrapolation
+                    projection_response = max_response * (
+                        (projection_spend**alpha)
+                        / ((projection_spend**alpha) + (gamma**alpha))
+                    )
+
+                    # Add trace for projection curve (dotted line)
+                    fig.add_trace(
+                        go.Scatter(
+                            x=projection_spend,
+                            y=projection_response,
+                            name=f"{channel} (projected)",
+                            line=dict(
+                                color=colors[i % len(colors)], width=2, dash="dot"
+                            ),
+                            legendgroup=channel,
+                            showlegend=False,
+                        )
+                    )
+                else:
+                    # Use existing data for projection
+                    fig.add_trace(
+                        go.Scatter(
+                            x=projection_data["spend"],
+                            y=projection_data["total_response"],
+                            name=f"{channel} (projected)",
+                            line=dict(
+                                color=colors[i % len(colors)], width=2, dash="dot"
+                            ),
+                            legendgroup=channel,
+                            showlegend=False,
+                        )
+                    )
+
+                # Add points for each scenario except Initial
+                for scenario_idx, scenario_type in enumerate(levs1[1:], 1):
+                    scenario_points = mainPoints[
+                        (mainPoints["channel"] == channel)
+                        & (mainPoints["type"] == scenario_type)
+                    ]
+
+                    if not scenario_points.empty:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=scenario_points["spend_point"],
+                                y=scenario_points["response_point"],
+                                mode="markers",
+                                marker=dict(
+                                    color=colors[i % len(colors)],
+                                    size=12,
+                                    symbol=scenario_markers[
+                                        (scenario_idx - 1) % len(scenario_markers)
+                                    ],
+                                    line=dict(
+                                        color=scenario_colors[
+                                            (scenario_idx - 1) % len(scenario_colors)
+                                        ],
+                                        width=2,
+                                    ),
+                                ),
+                                name=scenario_type,
+                                legendgroup=scenario_type,
+                                showlegend=(
+                                    i == 0
+                                ),  # Show in legend only for first channel
+                            )
+                        )
+
+            # Add a trace for the projection line legend
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="lines",
+                    line=dict(color="black", width=2, dash="dot"),
+                    name="Projection (up to 3x initial spend)",
+                    showlegend=True,
+                )
+            )
+
+            # Add a trace for carryover area legend
+            fig.add_trace(
+                go.Scatter(
+                    x=[None],
+                    y=[None],
+                    mode="none",
+                    fill="tozeroy",
+                    fillcolor="rgba(128, 128, 128, 0.4)",
+                    name="Historical Carryover",
+                    showlegend=True,
+                )
+            )
+
+            # Update layout
+            fig.update_layout(
+                title={
+                    "text": (
+                        f"Comparative Response Curves Across All Channels<br>"
+                        f"<span style='font-size:10px'>"
+                        f"Solid: Historical Data | Dotted: Projections (up to 3x initial spend) | "
+                        f"Grey Area: Historical Carryover | "
+                        f"Spend per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}"
+                        "</span>"
+                    ),
+                    "y": 0.95,
+                    "x": 0.02,
+                    "xanchor": "left",
+                    "yanchor": "top",
+                    "font": {"size": 12},
+                },
+                xaxis_title="Spend",
+                yaxis_title=f"Response [{self.budget_allocator.mmm_data.mmmdata_spec.dep_var_type}]",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    font=dict(size=9),
+                ),
+                height=600,
+                width=1000,
+                template="plotly_white",
+                margin=dict(t=100, b=80, l=120, r=50),
+            )
+
+            # Format axis labels with commas
+            fig.update_xaxes(
+                tickformat=",",
+                showgrid=True,
+                gridwidth=1,
+                gridcolor="rgba(128, 128, 128, 0.2)",
+                zeroline=True,
+                zerolinewidth=1,
+                zerolinecolor="rgba(128, 128, 128, 0.2)",
+            )
+
+            fig.update_yaxes(
+                tickformat=",",
+                showgrid=True,
+                gridwidth=1,
+                gridcolor="rgba(128, 128, 128, 0.2)",
+                zeroline=True,
+                zerolinewidth=1,
+                zerolinecolor="rgba(128, 128, 128, 0.2)",
+            )
+
+            return fig
+
+        except Exception as e:
+            logger.error("Failed to create combined response curves plot: %s", str(e))
+            raise
+
     def plot_all(
         self,
         display_plots: bool = True,
@@ -859,6 +1127,9 @@ class AllocatorVisualizer(BaseVisualizer):
                 "budget_opt": self._plot_response_spend_comparison(),
                 "allocation": self._plot_allocation_comparison(),
                 "response": self._plot_response_curves(),
+                "combined_response": self._plot_combined_response_curves(
+                    max_projection_spend=50000000
+                ),
             }
 
             if display_plots:
