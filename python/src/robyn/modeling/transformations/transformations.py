@@ -242,14 +242,6 @@ class Transformation:
         rollingWindowStartWhich = self.mmm_data.mmmdata_spec.rolling_window_start_which
         rollingWindowEndWhich = self.mmm_data.mmmdata_spec.rolling_window_end_which
 
-        # print("Rolling window start which: ", rollingWindowStartWhich)
-        # print("Rolling window end which: ", rollingWindowEndWhich)
-
-        # if rollingWindowStartWhich is None or rollingWindowEndWhich is None:
-        #     # Use default values if not specified
-        #     rollingWindowStartWhich = 7
-        #     rollingWindowEndWhich = 163
-        #     # print("Set default values")
         dt_modAdstocked = featurized_data.dt_mod.copy()
         if "ds" in dt_modAdstocked.columns:
             logger.debug("Removing 'ds' column from data")

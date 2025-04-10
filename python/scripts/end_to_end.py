@@ -15,6 +15,7 @@ from IPython.display import Image, display
 import shutil
 
 # Robyn imports
+from robyn.robyn import Robyn
 from robyn.data.entities.mmmdata import MMMData
 from robyn.data.entities.holidays_data import HolidaysData
 from robyn.data.entities.hyperparameters import Hyperparameters, ChannelHyperparameters
@@ -91,7 +92,7 @@ LAMBDA_RANGE = [0, 1]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 1000, "trials": 2}
+TRIALS_CONFIG = {"iterations": 200, "trials": 2}
 
 MODEL_EXECUTION_PARAMS = {
     "ts_validation": True,
@@ -142,6 +143,38 @@ def clear_output_directory(directory_path):
     print(f"Created fresh output directory: {path}")
 
 
+def configure_logging(WORKING_DIR):
+    # ## Configure Logging
+    import os
+    import logging.config
+    from datetime import datetime
+
+    # Create log directory if it doesn't exist
+    log_dir = os.path.join(
+        WORKING_DIR, "logs"
+    )  # Use relative path in current directory
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Generate a unique log file name using the current date and time
+    log_file_name = f"robynpy_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file_path = os.path.join(log_dir, log_file_name)
+
+    # Get the package directory for the logging config
+    import robyn
+
+    robyn_pkg_dir = os.path.dirname(robyn.__file__)
+    logging_conf_path = os.path.join(robyn_pkg_dir, "common", "config", "logging.conf")
+
+    # Load the logging configuration with the dynamic log file name
+    logging.config.fileConfig(
+        logging_conf_path,
+        defaults={"logfilename": log_file_path},
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.info("Logging initialized - check log directory for detailed logs")
+
+
 def main():
     """Main function executing the entire MMM workflow"""
     # Clear output directory before running
@@ -149,7 +182,7 @@ def main():
 
     # Create data directory if needed
     DATA_PATH.mkdir(parents=True, exist_ok=True)
-
+    configure_logging(WORKING_DIR)
     # Set up plotly renderer
     pio.renderers.default = "iframe"
 

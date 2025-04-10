@@ -92,7 +92,7 @@ def calculate_response(
     # Prep environment
     dt_input = mmm_data.data
     start_rw = mmm_data.mmmdata_spec.rolling_window_start_which
-    end_rw = mmm_data.mmmdata_spec.rolling_window_end_which
+    end_rw = mmm_data.mmmdata_spec.rolling_window_end_which + 1
     adstock = hyperparameters.adstock
     spend_expo_mod = featurized_mmm_data.modNLS["results"]
     paid_media_vars = mmm_data.mmmdata_spec.paid_media_vars
