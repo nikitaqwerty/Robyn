@@ -32,8 +32,8 @@ from robyn.visualization.cluster_visualizer import ClusterVisualizer
 from robyn.visualization.pareto_visualizer import ParetoVisualizer
 from robyn.allocator.entities.allocation_params import AllocatorParams
 from robyn.allocator.constants import SCENARIO_MAX_RESPONSE, CONSTRAINT_MODE_EQ
-from robyn.allocator.optimizer import BudgetAllocator
-from robyn.visualization.allocator_visualizer import AllocatorPlotter
+from robyn.allocator.allocator import BudgetAllocator
+from robyn.visualization.allocator_visualizer import AllocatorVisualizer
 
 # ============== HYPERPARAMETERS AND CONFIGURATION ==============
 
@@ -41,7 +41,7 @@ from robyn.visualization.allocator_visualizer import AllocatorPlotter
 BASE_PATH = Path("../mmm")
 
 # Basic configuration
-VERSION = "0.5.test"
+VERSION = "0.6.test"
 DATA_PATH = BASE_PATH / f'data/{".".join(VERSION.split(".")[0:2])}'
 WORKING_DIR = BASE_PATH / f"output/robyn_output_{VERSION}"
 START_DATE = "2022-05-01"
@@ -184,7 +184,7 @@ def main():
         date_var="Date",  # Date column name
         context_vars=event_cols + ["MeanBonusAmount"],  # External factors
         paid_media_spends=spend_cols,  # Media spend columns
-        paid_media_vars=[],  # Media metrics
+        # paid_media_vars=None,  # Media metrics
         organic_vars=[],  # Non-paid marketing activities
         window_start=START_DATE,  # Analysis start date
         window_end=END_DATE,  # Analysis end date
@@ -219,9 +219,6 @@ def main():
         lambda_=LAMBDA_RANGE,
         train_size=TRAIN_SIZE_RANGE,
     )
-
-    # Initialize Robyn instance
-    robyn = Robyn(working_dir=str(WORKING_DIR))
 
     # Feature engineering
     print("Performing feature engineering...")
@@ -259,8 +256,8 @@ def main():
         seed=MODEL_EXECUTION_PARAMS["seed"],
         val_size=MODEL_EXECUTION_PARAMS["val_size"],
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
-        fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
-        fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
+        # fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
+        # fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
     )
 
     # Display model output summaries
@@ -331,12 +328,10 @@ def main():
         "mae", ascending=True
     ).iloc[0]
     best_mae_model = best_mae_row.sol_id
-    print(f"Best model: {best_mae_model}, mae: {best_mae_row.mae}")
+    print(f"Best model from pareto results: {best_mae_model},  MAE: {best_mae_row.mae}")
 
     plot_data = pareto_result.plot_data_collect[best_mae_model]
     ts_data = plot_data["plot5data"]["xDecompVecPlotMelted"]
-    print("Time series data:")
-    print(ts_data.tail(10))
 
     # Analyze time series data
     def reshape_and_analyze_ts_data(df):
@@ -367,17 +362,14 @@ def main():
         # R-squared
         metrics["r2"] = r2_score(last_10["actual"], last_10["predicted"])
 
-        return wide_df, last_10, metrics
+        return last_10, metrics
 
-    wide_data, last_10_rows, metrics = reshape_and_analyze_ts_data(ts_data)
+    last_10_rows, metrics = reshape_and_analyze_ts_data(ts_data)
 
     # Display the results for original data
     print("Original Data - Metrics for the last 10 data points:")
     print(f"MAE: {metrics['mae']:.4f}")
-    print(f"RMSE: {metrics['rmse']:.4f}")
     print(f"R2: {metrics['r2']:.4f}")
-
-    print("\nOriginal data (last 10 rows):")
     print(last_10_rows)
 
     # Visualize Pareto results
@@ -392,7 +384,7 @@ def main():
         model_outputs=output_models,
     )
     pareto_visualizer.plot_all(
-        display_plots=True,
+        display_plots=False,
         export_location=str(WORKING_DIR),
         display_criteria="best_mae_test",
     )
@@ -404,7 +396,7 @@ def main():
         cluster_results,
         mmm_data,
     )
-    cluster_visualizer.plot_all(display_plots=True, export_location=str(WORKING_DIR))
+    cluster_visualizer.plot_all(display_plots=False, export_location=str(WORKING_DIR))
 
     # Select model for budget allocation
     select_model = (
@@ -439,26 +431,23 @@ def main():
         params=allocator_params,
     )
 
-    # Run optimization
-    max_response_result = max_response_allocator.optimize()
-
     # Display allocation results
     results_df = pd.DataFrame(
         {
-            "Channel": max_response_result.dt_optimOut.channels,
-            "Initial Spend": max_response_result.dt_optimOut.init_spend_unit,
-            "Optimized Spend": max_response_result.dt_optimOut.optm_spend_unit,
+            "Channel": max_response_allocator.dt_optim_out.channels,
+            "Initial Spend": max_response_allocator.dt_optim_out.initSpendUnit,
+            "Optimized Spend": max_response_allocator.dt_optim_out.optmSpendUnit,
             "Spend Change %": (
-                max_response_result.dt_optimOut.optm_spend_unit
-                / max_response_result.dt_optimOut.init_spend_unit
+                max_response_allocator.dt_optim_out.optmSpendUnit
+                / max_response_allocator.dt_optim_out.initSpendUnit
                 - 1
             )
             * 100,
-            "Initial Response": max_response_result.dt_optimOut.init_response_unit,
-            "Optimized Response": max_response_result.dt_optimOut.optm_response_unit,
+            "Initial Response": max_response_allocator.dt_optim_out.initResponseUnit,
+            "Optimized Response": max_response_allocator.dt_optim_out.optmResponseUnit,
             "Response Lift %": (
-                max_response_result.dt_optimOut.optm_response_unit
-                / max_response_result.dt_optimOut.init_response_unit
+                max_response_allocator.dt_optim_out.optmResponseUnit
+                / max_response_allocator.dt_optim_out.initResponseUnit
                 - 1
             )
             * 100,
@@ -470,11 +459,9 @@ def main():
 
     # Create allocation plots
     print("Creating allocation visualizations...")
-    plotter = AllocatorPlotter(
-        allocation_result=max_response_result, budget_allocator=max_response_allocator
-    )
+    plotter = AllocatorVisualizer(budget_allocator=max_response_allocator)
 
-    plots = plotter.plot_all(display_plots=True, export_location=str(WORKING_DIR))
+    plots = plotter.plot_all(display_plots=False, export_location=str(WORKING_DIR))
 
     print(f"MMM analysis complete. All outputs saved to {WORKING_DIR}")
 
