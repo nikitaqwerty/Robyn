@@ -15,7 +15,6 @@ from IPython.display import Image, display
 import shutil
 
 # Robyn imports
-from robyn.robyn import Robyn
 from robyn.data.entities.mmmdata import MMMData
 from robyn.data.entities.holidays_data import HolidaysData
 from robyn.data.entities.hyperparameters import Hyperparameters, ChannelHyperparameters
@@ -34,6 +33,8 @@ from robyn.allocator.entities.allocation_params import AllocatorParams
 from robyn.allocator.constants import SCENARIO_MAX_RESPONSE, CONSTRAINT_MODE_EQ
 from robyn.allocator.allocator import BudgetAllocator
 from robyn.visualization.allocator_visualizer import AllocatorVisualizer
+from robyn.reporting.onepager_reporting import OnePager
+
 
 # ============== HYPERPARAMETERS AND CONFIGURATION ==============
 
@@ -405,6 +406,14 @@ def main():
         .sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
+
+    OnePager(
+        pareto_result, cluster_results, hyperparameters, mmm_data, holidays_data
+    ).generate_one_pager(
+        solution_ids=select_model,
+        figsize=(20, 40),
+        save_path=str(WORKING_DIR),
+    )
 
     # Run budget allocation
     print("Running budget allocation...")
