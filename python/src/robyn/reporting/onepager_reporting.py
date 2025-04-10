@@ -7,6 +7,7 @@ from robyn.data.entities.holidays_data import HolidaysData
 import seaborn as sns
 import pandas as pd
 import logging
+import gc
 
 from robyn.modeling.entities.pareto_result import ParetoResult
 from robyn.modeling.entities.clustering_results import ClusteredResult
@@ -102,9 +103,13 @@ class OnePager:
             ]
 
             if plot_media_share.empty:
-                raise ValueError(
-                    f"No media share data found for solution {solution_id}"
-                )
+                logger.warning(f"No media share data found for solution {solution_id}")
+                return {
+                    "rsq_train": "0.0000",
+                    "nrmse_train": "0.0000",
+                    "decomp_rssd": "0.0000",
+                    "formatted_text": "No metrics available",
+                }
 
             metrics = {}
 
@@ -143,38 +148,35 @@ class OnePager:
             if "mape" in plot_media_share.columns:
                 metrics["mape"] = self._safe_format(plot_media_share["mape"].iloc[0])
 
-            # Get train size
-            metrics["train_size"] = self._safe_format(
-                plot_media_share["train_size"].iloc[0]
-            )
-
             # Calculate performance (ROAS/CPA)
             dep_var_type = self.mmm_data.mmmdata_spec.dep_var_type
             type_metric = "CPA" if dep_var_type == "conversion" else "ROAS"
 
-            perf = (
-                x_decomp_agg[
-                    (x_decomp_agg["sol_id"] == solution_id)
-                    & (
-                        x_decomp_agg["rn"].isin(
-                            self.mmm_data.mmmdata_spec.paid_media_spends
-                        )
+            # Use copy to avoid SettingWithCopyWarning
+            temp_data = x_decomp_agg[
+                (x_decomp_agg["sol_id"] == solution_id)
+                & (
+                    x_decomp_agg["rn"].isin(
+                        self.mmm_data.mmmdata_spec.paid_media_spends
                     )
-                ]
-                .groupby("sol_id")
-                .agg({"xDecompAgg": "sum", "total_spend": "sum"})
-            )
+                )
+            ].copy()
 
-            if not perf.empty:
-                if type_metric == "ROAS":
-                    performance = (
-                        perf["xDecompAgg"].iloc[0] / perf["total_spend"].iloc[0]
-                    )
-                else:  # CPA
-                    performance = (
-                        perf["total_spend"].iloc[0] / perf["xDecompAgg"].iloc[0]
-                    )
-                metrics["performance"] = f"{performance:.3g} {type_metric}"
+            if not temp_data.empty:
+                perf = temp_data.groupby("sol_id").agg(
+                    {"xDecompAgg": "sum", "total_spend": "sum"}
+                )
+
+                if not perf.empty:
+                    if type_metric == "ROAS":
+                        performance = (
+                            perf["xDecompAgg"].iloc[0] / perf["total_spend"].iloc[0]
+                        )
+                    else:  # CPA
+                        performance = (
+                            perf["total_spend"].iloc[0] / perf["xDecompAgg"].iloc[0]
+                        )
+                    metrics["performance"] = f"{performance:.3g} {type_metric}"
 
             # Format metrics text
             if "rsq_val" in metrics:
@@ -224,10 +226,10 @@ class OnePager:
             # Add title with larger font and bold
             fig.suptitle(
                 f"MMM Analysis One-Pager for Model: {solution_id}",
-                fontsize=24,  # Increased from 18
+                fontsize=24,
                 y=0.98,
-                weight="bold",  # Makes the text bold
-                fontfamily="sans-serif",  # Clear font family
+                weight="bold",
+                fontfamily="sans-serif",
             )
 
             # Add metrics text if available
@@ -236,10 +238,10 @@ class OnePager:
                     0.5,  # Center horizontally
                     0.955,  # Position below title
                     metrics_text,
-                    fontsize=16,  # Increased from 14
+                    fontsize=16,
                     ha="center",
                     va="top",
-                    weight="bold",  # Also make metrics bold
+                    weight="bold",
                 )
         except Exception as e:
             logger.error(f"Error adding title and metrics: {str(e)}")
@@ -268,32 +270,55 @@ class OnePager:
                     )
 
             # Initialize visualizers
-            pareto_viz = (
-                ParetoVisualizer(
-                    self.pareto_result,
-                    self.mmm_data,
-                    self.holidays_data,
-                    self.hyperparameter,
+            pareto_viz = None
+            cluster_viz = None
+            response_viz = None
+            transfor_viz = None
+
+            # Initialize visualizers only when needed
+            if any(
+                plot
+                in [
+                    PlotType.WATERFALL,
+                    PlotType.FITTED_VS_ACTUAL,
+                    PlotType.DIAGNOSTIC,
+                    PlotType.IMMEDIATE_CARRYOVER,
+                    PlotType.ADSTOCK,
+                ]
+                for plot in plots
+            ):
+                pareto_viz = (
+                    ParetoVisualizer(
+                        self.pareto_result,
+                        self.mmm_data,
+                        self.holidays_data,
+                        self.hyperparameter,
+                    )
+                    if self.hyperparameter and self.holidays_data
+                    else None
                 )
-                if self.hyperparameter and self.holidays_data
-                else None
-            )
-            cluster_viz = (
-                ClusterVisualizer(
+
+            if PlotType.BOOTSTRAP in plots and self.clustered_result:
+                cluster_viz = ClusterVisualizer(
                     self.pareto_result, self.clustered_result, self.mmm_data
                 )
-                if self.clustered_result
-                else None
-            )
-            response_viz = ResponseVisualizer(self.pareto_result, self.mmm_data)
-            transfor_viz = TransformationVisualizer(self.pareto_result, self.mmm_data)
+
+            if PlotType.RESPONSE_CURVES in plots:
+                response_viz = ResponseVisualizer(self.pareto_result, self.mmm_data)
+
+            if PlotType.SPEND_EFFECT in plots:
+                transfor_viz = TransformationVisualizer(
+                    self.pareto_result, self.mmm_data
+                )
 
             # Define plot configurations
             plot_config = {
                 PlotType.SPEND_EFFECT: {
                     "title": "Share of Total Spend, Effect & Performance",
-                    "func": lambda ax: transfor_viz.generate_spend_effect_comparison(
-                        solution_id, ax
+                    "func": lambda ax: (
+                        transfor_viz.generate_spend_effect_comparison(solution_id, ax)
+                        if transfor_viz
+                        else None
                     ),
                 },
                 PlotType.WATERFALL: {
@@ -346,8 +371,10 @@ class OnePager:
                 },
                 PlotType.RESPONSE_CURVES: {
                     "title": "Response Curves and Mean Spends by Channel",
-                    "func": lambda ax: response_viz.generate_response_curves(
-                        solution_id, ax
+                    "func": lambda ax: (
+                        response_viz.generate_response_curves(solution_id, ax)
+                        if response_viz
+                        else None
                     ),
                 },
             }
@@ -378,7 +405,11 @@ class OnePager:
                         ha="center",
                         va="center",
                     )
-                    raise e
+                    # Don't raise the exception, continue with other plots
+
+            # Clear visualizers to free memory
+            del pareto_viz, cluster_viz, response_viz, transfor_viz
+            gc.collect()
 
         except Exception as e:
             logger.error(
@@ -391,9 +422,10 @@ class OnePager:
         self,
         solution_ids: Union[str, List[str]] = "all",
         plots: Optional[List[PlotType]] = None,
-        figsize: tuple = (30, 34),
+        figsize: tuple = (30, 34),  # Original size
         save_path: Optional[str] = None,
         top_pareto: bool = False,
+        max_solutions: int = 5,  # Limit number of solutions to process
     ) -> List[plt.Figure]:
         """Generate separate one-pager for each solution ID.
 
@@ -403,6 +435,7 @@ class OnePager:
             figsize: Figure size for each page
             save_path: Optional path to save the figures
             top_pareto: If True, loads the one-page summaries for the top Pareto models
+            max_solutions: Maximum number of solutions to process (default: 5)
 
         Returns:
             List[plt.Figure]: List of generated figures, one per solution
@@ -466,12 +499,13 @@ class OnePager:
                     f"solution_ids must be string or list/tuple, got {type(solution_ids)}"
                 )
 
-            if len(solution_ids) > 1 and not top_pareto:
-                warnings.warn(
-                    "Too many one pagers to load, please either select top_pareto=True "
-                    "or just specify a solution id. Plotting one pager for the first solution id"
-                )
-                solution_ids = [solution_ids[0]]
+        # Limit number of solutions to prevent memory issues
+        if len(solution_ids) > max_solutions:
+            warnings.warn(
+                f"Too many solutions to process ({len(solution_ids)}). "
+                f"Limiting to {max_solutions} solutions to prevent memory issues."
+            )
+            solution_ids = solution_ids[:max_solutions]
 
         # Validate solution IDs
         invalid_ids = [
@@ -492,43 +526,66 @@ class OnePager:
                     f"Generating one-pager for solution {solution_id} ({i+1}/{len(solution_ids)})"
                 )
 
-                n_plots = len(plots)
-                n_rows = (n_plots + 1) // 2  # Ceiling division for number of rows
+                try:
+                    # Close any existing figures to prevent memory leaks
+                    plt.close("all")
 
-                # Create figure
-                fig = plt.figure(figsize=figsize)
+                    n_plots = len(plots)
+                    n_rows = (n_plots + 1) // 2  # Ceiling division for number of rows
 
-                # Create GridSpec with explicit spacing parameters
-                gs = GridSpec(
-                    n_rows,
-                    2,
-                    figure=fig,
-                    height_ratios=[1] * n_rows,
-                    top=0.92,  # Space for title and metrics
-                    bottom=0.05,  # Extend plots to bottom
-                    left=0.08,  # Left margin
-                    right=0.92,  # Right margin
-                    hspace=0.4,  # Vertical space between subplots
-                    wspace=0.2,  # Horizontal space between subplots
-                )
+                    # Create figure with the specified size
+                    fig = plt.figure(figsize=figsize)
 
-                # Generate plots for this solution
-                self._generate_solution_plots(solution_id, plots, gs)
+                    # Create GridSpec with explicit spacing parameters
+                    gs = GridSpec(
+                        n_rows,
+                        2,
+                        figure=fig,
+                        height_ratios=[1] * n_rows,
+                        top=0.92,  # Space for title and metrics
+                        bottom=0.05,  # Extend plots to bottom
+                        left=0.08,  # Left margin
+                        right=0.92,  # Right margin
+                        hspace=0.4,  # Vertical space between subplots
+                        wspace=0.2,  # Horizontal space between subplots
+                    )
 
-                # Add title and metrics
-                self._add_title_and_metrics(fig, solution_id)
+                    # Generate plots for this solution
+                    self._generate_solution_plots(solution_id, plots, gs)
 
-                if save_path:
-                    save_file = os.path.join(save_path, f"solution_{solution_id}.png")
-                    fig.savefig(save_file, dpi=300, bbox_inches="tight", pad_inches=0.5)
-                    logger.debug(f"Saved figure to {save_file}")
+                    # Add title and metrics
+                    self._add_title_and_metrics(fig, solution_id)
 
-                figures.append(fig)
+                    if save_path:
+                        save_file = os.path.join(
+                            save_path, f"solution_{solution_id}.png"
+                        )
+                        fig.savefig(save_file, bbox_inches="tight", pad_inches=0.5)
+                        logger.debug(f"Saved figure to {save_file}")
+
+                    # Store the figure only if needed for return
+                    if not save_path:
+                        figures.append(fig)
+                    else:
+                        # Close figure after saving to free memory
+                        plt.close(fig)
+                        # Just store the filename if saved to disk
+                        figures.append(save_file)
+
+                    # Force garbage collection after each solution
+                    gc.collect()
+
+                except Exception as e:
+                    logger.error(
+                        f"Error generating plot for solution {solution_id}: {str(e)}",
+                        exc_info=True,
+                    )
+                    plt.close("all")  # Make sure to close any open figures
 
         except Exception as e:
             logger.error(f"Error generating plots: {str(e)}", exc_info=True)
-            for fig in figures:
-                plt.close(fig)
+            # Close all figures to free memory
+            plt.close("all")
             raise
 
         return figures
