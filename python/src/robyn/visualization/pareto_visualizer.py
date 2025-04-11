@@ -1668,6 +1668,7 @@ class ParetoVisualizer(BaseVisualizer):
             "best_nrmse_train": ("nrmse_train", True),
             "best_nrmse_test": ("nrmse_test", True),
             "best_mae_test": ("mae", True),
+            "best_error_score": ("error_score", True),
         }
 
         for key, (metric, ascending) in criteria_metrics.items():
