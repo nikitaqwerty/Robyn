@@ -52,12 +52,9 @@ END_DATE = "2025-01-01"
 # Channel-specific hyperparameters
 CHANNEL_HYPERPARAMETERS = {
     "AffiliatesCPA_spend": {
-        # "alphas": [0.5, 3],
-        # "gammas": [0.3, 1],
-        # "thetas": [0, 0.3],
-        "alphas": [2.995269, 2.995269],
-        "gammas": [0.999621, 0.999621],
-        "thetas": [0.021261, 0.021261],
+        "alphas": [0.5, 3],
+        "gammas": [0.3, 1],
+        "thetas": [0, 0.3],
     },
     "Comms_spend": {
         "alphas": [0.5, 3],
@@ -290,8 +287,8 @@ def main():
         seed=MODEL_EXECUTION_PARAMS["seed"],
         val_size=MODEL_EXECUTION_PARAMS["val_size"],
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
-        # fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
-        # fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
+        fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
+        fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
     )
 
     # Display model output summaries
@@ -405,6 +402,11 @@ def main():
     print(f"MAE: {metrics['mae']:.4f}")
     print(f"R2: {metrics['r2']:.4f}")
     print(last_10_rows)
+
+    pareto_result.result_hyp_param.to_csv(
+        WORKING_DIR / "pareto_result_result_hyp_param.csv"
+    )
+    pareto_result.x_decomp_agg.to_csv(WORKING_DIR / "pareto_result_x_decomp_agg.csv")
 
     # Visualize Pareto results
     print("Visualizing Pareto results...")
