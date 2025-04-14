@@ -287,8 +287,8 @@ def main():
         seed=MODEL_EXECUTION_PARAMS["seed"],
         val_size=MODEL_EXECUTION_PARAMS["val_size"],
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
-        fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
-        fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
+        # fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
+        # fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
     )
 
     # Display model output summaries
