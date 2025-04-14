@@ -621,12 +621,20 @@ class AllocatorVisualizer(BaseVisualizer):
         num_channels = len(plotDT_scurve["constr_label"].unique())
         num_rows = (num_channels + 2) // 3
 
+        # Calculate the maximum allowed vertical spacing
+        # The formula is based on plotly's constraint: vertical_spacing <= 1/(rows-1)
+        max_vert_spacing = 1.0 / max(1, num_rows - 1)
+
+        # Use the smaller of 0.15 or the calculated maximum to ensure we never exceed the limit
+        # Adding a small buffer (0.99) to avoid floating-point comparison issues
+        vertical_spacing = min(0.15, max_vert_spacing * 0.99)
+
         fig = make_subplots(
             rows=num_rows,
             cols=3,
             subplot_titles=plotDT_scurve["constr_label"].unique(),
-            horizontal_spacing=0.15,  # Increased from 0.1
-            vertical_spacing=0.25,  # Increased from 0.15
+            horizontal_spacing=0.15,
+            vertical_spacing=vertical_spacing,  # Dynamic spacing based on number of rows
         )
 
         # Add traces for each channel
@@ -764,6 +772,12 @@ class AllocatorVisualizer(BaseVisualizer):
                                 col=col,
                             )
 
+        # Adjust the height based on the number of rows (more rows need more height)
+        height_per_row = 200  # Base height per row
+        total_height = max(
+            300, min(1200, height_per_row * num_rows)
+        )  # Capped between 300 and 1200 pixels
+
         # Update layout with improved formatting
         fig.update_layout(
             title={
@@ -775,7 +789,7 @@ class AllocatorVisualizer(BaseVisualizer):
                     f"Response [{self.budget_allocator.mmm_data.mmmdata_spec.dep_var_type}]"
                     "</span>"
                 ),
-                "y": 0.95,
+                "y": 0.99,  # Move title higher when we have many rows
                 "x": 0.02,
                 "xanchor": "left",
                 "yanchor": "top",
@@ -790,15 +804,16 @@ class AllocatorVisualizer(BaseVisualizer):
                 x=1.05,
                 font=dict(size=10),
             ),
-            height=300 * num_rows,
+            height=total_height,  # Dynamic height based on number of rows
             width=1000,
             template="plotly_white",
-            margin=dict(t=80, b=80, l=120, r=50),  # Reduced top margin from 120 to 80
+            margin=dict(t=80, b=80, l=120, r=50),
             annotations=[
                 dict(
                     text=f"Spend** per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}",
                     x=0.5,
-                    y=-0.15,
+                    y=-0.15
+                    / (num_rows**0.5),  # Scale y position based on number of rows
                     xref="paper",
                     yref="paper",
                     showarrow=False,
@@ -806,7 +821,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 ),
                 dict(
                     text=f"Total Response [{self.budget_allocator.mmm_data.mmmdata_spec.dep_var_type}]",
-                    x=-0.08,  # Adjusted position
+                    x=-0.08,
                     y=0.35,
                     xref="paper",
                     yref="paper",
