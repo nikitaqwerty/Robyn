@@ -90,7 +90,7 @@ LAMBDA_RANGE = [0, 1]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 200, "trials": 2}
+TRIALS_CONFIG = {"iterations": 3000, "trials": 2}
 
 MODEL_EXECUTION_PARAMS = {
     "ts_validation": True,
@@ -437,7 +437,9 @@ def main():
 
     # Select model for budget allocation
     select_model = (
-        pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0].sol_id
+        pareto_result.result_hyp_param.sort_values("error_score", ascending=True)
+        .iloc[0]
+        .sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
 

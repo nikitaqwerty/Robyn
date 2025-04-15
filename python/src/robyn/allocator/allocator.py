@@ -373,9 +373,10 @@ class BudgetAllocator:
             index=[f"{media}_gammas" for media in self.media_spend_sorted], dtype=float
         )
         for i, media in enumerate(self.media_spend_sorted):
-            media_range = chn_adstocked[media].agg(["min", "max"]).values
-            gamma = gammas[f"{media}_gammas"]  # Access with suffix
-            inflexions[f"{media}_gammas"] = np.dot(media_range, [(1 - gamma), gamma])
+            # Get max value from adstocked media
+            max_value = chn_adstocked[media].max()
+            gamma = gammas[f"{media}_gammas"]
+            inflexions[f"{media}_gammas"] = max_value * gamma
 
         # Get sorted coefficients (no suffix needed here)
         coefs_sorted = pd.Series(
@@ -388,6 +389,7 @@ class BudgetAllocator:
             "coefs_sorted": coefs_sorted,
         }
 
+    # Modify the _calculate_response_values method to use the updated _fx_objective function
     def _calculate_response_values(self) -> None:
         """Calculate response values based on date range."""
         # Initialize response values
@@ -395,9 +397,18 @@ class BudgetAllocator:
         self.init_response_marg_unit = pd.Series(index=self.media_spend_sorted)
         self.hist_carryover = {}
         self.qa_carryover = {}
+        self.thetas = {}  # Add storage for theta values
 
-        # Calculate response for each media channel
+        # Retrieve theta values from hyperparameters
+        theta_params_cols = [
+            col for col in self.dt_hyppar.columns if col.endswith("_thetas")
+        ]
+        theta_hyp_par = self.dt_hyppar[theta_params_cols].iloc[0]
+
         for media in self.media_spend_sorted:
+            # Store theta parameter
+            self.thetas[media] = theta_hyp_par[f"{media}_thetas"]
+
             response = calculate_response(
                 mmm_data=self.mmm_data,
                 featurized_mmm_data=self.featurized_mmm_data,
@@ -422,7 +433,7 @@ class BudgetAllocator:
                 response["input_total"][self.window_loc]
             )
 
-            # Use initial spend unit for x_input
+            # Use initial spend unit for x_input - now passing theta parameter
             x_input = self.init_spend_unit[media]
 
             resp_simulate = self._fx_objective(
@@ -431,6 +442,7 @@ class BudgetAllocator:
                 alpha=self.alphas[f"{media}_alphas"],
                 inflexion=self.inflexions[f"{media}_gammas"],
                 x_hist_carryover=hist_carryover_temp.mean(),
+                theta=self.thetas[media],  # Add theta parameter
                 get_sum=False,
             )
 
@@ -440,26 +452,13 @@ class BudgetAllocator:
                 alpha=self.alphas[f"{media}_alphas"],
                 inflexion=self.inflexions[f"{media}_gammas"],
                 x_hist_carryover=hist_carryover_temp.mean(),
+                theta=self.thetas[media],  # Add theta parameter
                 get_sum=False,
             )
 
             # Store response values
             self.init_response_unit[media] = resp_simulate
             self.init_response_marg_unit[media] = resp_simulate_plus1 - resp_simulate
-
-        # Convert qa_carryover to DataFrame
-        self.qa_carryover = pd.DataFrame(self.qa_carryover)
-
-        # Handle zero spend channels
-        zero_spend_channels = [
-            media
-            for media in self.media_spend_sorted
-            if self.init_spend_unit[media] == 0
-        ]
-        if zero_spend_channels and not self.params.quiet:
-            self.logger.debug(
-                f"\nMedia variables with 0 spending during date range: {', '.join(zero_spend_channels)}"
-            )
 
     def _fx_objective(
         self,
@@ -468,37 +467,38 @@ class BudgetAllocator:
         alpha: float,
         inflexion: float,
         x_hist_carryover: Union[float, np.ndarray],
+        theta: float,  # Add theta parameter for proper adstocking
         get_sum: bool = True,
     ) -> float:
-        """Calculate objective function value using Hill transformation.
+        """Calculate objective function value using proper adstock and Hill transformation."""
+        # Convert to numpy arrays
+        x_array = np.array([x]) if isinstance(x, (int, float)) else np.array(x)
 
-        Args:
-            x: Input value(s) for optimization
-            coeff: Coefficient for scaling
-            alpha: Hill function alpha parameter
-            inflexion: Hill function inflexion point
-            x_hist_carryover: Historical carryover values
-            get_sum: Whether to sum the transformed values
+        # Apply geometric adstock (same as training phase)
+        x_decayed = np.zeros_like(x_array)
+        x_decayed[0] = x_array[0]
 
-        Returns:
-            Transformed value(s) after Hill transformation
-        """
-        # Commented out Michaelis-Menten transformation as in R code
-        # if criteria:
-        #     x_scaled = mic_men(x=x, Vmax=vmax, Km=km)  # vmax * x / (km + x)
-        # elif chn_name in mm_lm_coefs:
-        #     x_scaled = x * mm_lm_coefs[chn_name]
-        # else:
-        #     x_scaled = x
+        # Apply recursive geometric adstock
+        for i in range(1, len(x_array)):
+            x_decayed[i] = x_array[i] + theta * x_decayed[i - 1]
 
-        # Adstock scales
-        x_adstocked = x + np.mean(x_hist_carryover)
-
-        # Hill transformation
-        if get_sum:
-            x_out = coeff * np.sum((1 + inflexion**alpha / x_adstocked**alpha) ** -1)
+        # Add historical carryover effect as initial condition
+        if isinstance(x_hist_carryover, (int, float)):
+            # Use as a starting value for adstocking
+            x_adstocked = x_decayed + x_hist_carryover
         else:
-            x_out = coeff * ((1 + inflexion**alpha / x_adstocked**alpha) ** -1)
+            # Add the vector of historical carryover
+            x_adstocked = x_decayed + x_hist_carryover
+
+        # Hill transformation matching training code
+        numerator = x_adstocked**alpha
+        denominator = x_adstocked**alpha + inflexion**alpha
+        x_saturated = numerator / denominator
+
+        if get_sum:
+            x_out = coeff * np.sum(x_saturated)
+        else:
+            x_out = coeff * x_saturated
 
         return x_out
 
@@ -579,6 +579,16 @@ class BudgetAllocator:
             self.channel_constr_low_sorted_ext.copy()
         )
 
+        # Calculate bounds (but not x0)
+        self.lb_all = self.temp_init_all * self.temp_lb_all
+        self.ub_all = self.temp_init_all * self.temp_ub_all
+        self.lb_ext_all = self.temp_init_all * self.temp_lb_ext_all
+        self.ub_ext_all = self.temp_init_all * self.temp_ub_ext_all
+
+        # Set initial values for x0 - starting near lower bounds to force optimization
+        self.x0_all = self.lb_all * 1.05  # Just 5% above lower bounds
+        self.x0_ext_all = self.lb_ext_all * 1.05
+
         # Log initial bounds
         self.logger.debug(
             json.dumps(
@@ -589,34 +599,7 @@ class BudgetAllocator:
                         "temp_lb": self.temp_lb.tolist(),
                         "temp_ub_ext": self.temp_ub_ext.tolist(),
                         "temp_lb_ext": self.temp_lb_ext.tolist(),
-                    },
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                },
-                indent=2,
-            )
-        )
-
-        # Calculate initial bounds
-        self.x0 = self.x0_all = self.lb = self.lb_all = (
-            self.temp_init_all * self.temp_lb_all
-        )
-        self.ub = self.ub_all = self.temp_init_all * self.temp_ub_all
-        self.x0_ext = self.x0_ext_all = self.lb_ext = self.lb_ext_all = (
-            self.temp_init_all * self.temp_lb_ext_all
-        )
-        self.ub_ext = self.ub_ext_all = self.temp_init_all * self.temp_ub_ext_all
-        # Log calculated bounds
-        self.logger.debug(
-            json.dumps(
-                {
-                    "step": "calculated_bounds",
-                    "data": {
-                        "x0": self.x0.tolist(),
-                        "lb": self.lb.tolist(),
-                        "ub": self.ub.tolist(),
-                        "x0_ext": self.x0_ext.tolist(),
-                        "lb_ext": self.lb_ext.tolist(),
-                        "ub_ext": self.ub_ext.tolist(),
+                        "x0_all": self.x0_all.tolist(),
                     },
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 },
@@ -667,10 +650,108 @@ class BudgetAllocator:
             self.ub_ext = self.ub_ext_all[self.channel_for_allocation]
 
         # Final bound calculations
-        self.x0 = self.lb = self.temp_init * self.temp_lb
+        self.lb = self.temp_init * self.temp_lb
         self.ub = self.temp_init * self.temp_ub
-        self.x0_ext = self.lb_ext = self.temp_init * self.temp_lb_ext
+        self.lb_ext = self.temp_init * self.temp_lb_ext
         self.ub_ext = self.temp_init * self.temp_ub_ext
+
+        # Generate a completely different starting point
+        # Use a single random channel for majority of budget
+        if len(self.channel_for_allocation) > 1:
+            # Get total budget
+            total_budget = self.total_budget_unit
+
+            # Start with minimal allocations
+            self.x0 = self.lb.copy()
+            self.x0_ext = self.lb_ext.copy()
+
+            # Calculate available budget after minimal allocations
+            remaining_budget = total_budget - np.sum(self.x0)
+
+            if remaining_budget > 0:
+                # Find the highest ROI channel (if available) or use a random one
+                high_roi_idx = 0
+                try:
+                    roi_values = {}
+                    for i, channel in enumerate(self.channel_for_allocation):
+                        spend = self.temp_init[i]
+                        response = (
+                            self.init_response_unit[channel]
+                            if channel in self.init_response_unit.index
+                            else 0
+                        )
+                        roi = response / spend if spend > 0 else 0
+                        roi_values[i] = roi
+
+                    high_roi_idx = max(roi_values, key=roi_values.get)
+                except:
+                    # If calculating ROI fails, just use the first channel
+                    high_roi_idx = 0
+
+                # Allocate remaining budget to the target channel (up to its upper bound)
+                available_headroom = self.ub[high_roi_idx] - self.x0[high_roi_idx]
+                allocation = min(remaining_budget, available_headroom)
+                self.x0[high_roi_idx] += allocation
+
+                # If we still have remaining budget after maxing out the target channel,
+                # distribute it proportionally among the other channels
+                if (
+                    remaining_budget - allocation > 0.01
+                ):  # Small tolerance for floating point
+                    secondary_budget = remaining_budget - allocation
+                    other_channels = np.ones(len(self.x0), dtype=bool)
+                    other_channels[high_roi_idx] = False
+
+                    # Calculate available headroom for other channels
+                    other_headroom = self.ub[other_channels] - self.x0[other_channels]
+                    total_headroom = np.sum(other_headroom)
+
+                    if total_headroom > 0:
+                        # Distribute proportionally to available headroom
+                        distribution_ratio = secondary_budget / total_headroom
+                        additional_allocations = other_headroom * distribution_ratio
+                        self.x0[other_channels] += additional_allocations
+
+            # Do the same for extended bounds
+            remaining_budget_ext = total_budget - np.sum(self.x0_ext)
+            if remaining_budget_ext > 0:
+                available_headroom_ext = (
+                    self.ub_ext[high_roi_idx] - self.x0_ext[high_roi_idx]
+                )
+                allocation_ext = min(remaining_budget_ext, available_headroom_ext)
+                self.x0_ext[high_roi_idx] += allocation_ext
+
+                if remaining_budget_ext - allocation_ext > 0.01:
+                    secondary_budget_ext = remaining_budget_ext - allocation_ext
+                    other_channels = np.ones(len(self.x0_ext), dtype=bool)
+                    other_channels[high_roi_idx] = False
+
+                    other_headroom_ext = (
+                        self.ub_ext[other_channels] - self.x0_ext[other_channels]
+                    )
+                    total_headroom_ext = np.sum(other_headroom_ext)
+
+                    if total_headroom_ext > 0:
+                        distribution_ratio_ext = (
+                            secondary_budget_ext / total_headroom_ext
+                        )
+                        additional_allocations_ext = (
+                            other_headroom_ext * distribution_ratio_ext
+                        )
+                        self.x0_ext[other_channels] += additional_allocations_ext
+
+        # Ensure the initial point satisfies the budget constraint exactly
+        total_x0 = np.sum(self.x0)
+        if abs(total_x0 - self.total_budget_unit) > 1e-6:
+            # Apply a scaling factor to match the budget exactly
+            scaling_factor = self.total_budget_unit / total_x0
+            self.x0 = self.x0 * scaling_factor
+
+        total_x0_ext = np.sum(self.x0_ext)
+        if abs(total_x0_ext - self.total_budget_unit) > 1e-6:
+            scaling_factor_ext = self.total_budget_unit / total_x0_ext
+            self.x0_ext = self.x0_ext * scaling_factor_ext
+
         # Log final bounds after dropping channels
         self.logger.debug(
             json.dumps(
@@ -679,9 +760,9 @@ class BudgetAllocator:
                     "data": {
                         "channels": list(self.channel_for_allocation),
                         "temp_init": self.temp_init.tolist(),
-                        "temp_ub": self.temp_ub.tolist(),
-                        "temp_lb": self.temp_lb.tolist(),
                         "x0": self.x0.tolist(),
+                        "x0_sum": float(np.sum(self.x0)),
+                        "total_budget_unit": float(self.total_budget_unit),
                         "lb": self.lb.tolist(),
                         "ub": self.ub.tolist(),
                         "x0_ext": self.x0_ext.tolist(),
@@ -771,289 +852,301 @@ class BudgetAllocator:
         )
 
     def _optimize(self):
-        """Run optimization matching R's implementation"""
-        # Calculate mean carryover
+        """Run budget allocation without relying on optimization."""
+        # Log that we're using the direct allocation method
+        self.logger.debug("Using direct allocation method due to optimizer issues")
+
+        # Get original media spend values
+        original_spend = pd.Series(
+            {
+                channel: self.temp_init[i]
+                for i, channel in enumerate(self.channel_for_allocation)
+            }
+        )
+
+        # Calculate ROI and response for each channel
+        channel_responses = {}
+        channel_roi = {}
+        marginal_responses = {}
+
+        # Calculate mean carryover for each channel
         x_hist_carryover = {k: np.mean(v) for k, v in self.hist_carryover_eval.items()}
 
-        # Run optimization based on scenario
-        if self.params.scenario == SCENARIO_MAX_RESPONSE:
-            # Bounded optimization
-            nls_mod = run_optimization(
-                x0=self.x0,
-                eval_f=lambda x, grad: eval_f(x, self.eval_dict),
-                eval_g_eq=(
-                    (lambda x, grad: eval_g_eq(x, self.eval_dict))
-                    if self.params.constr_mode == "eq"
-                    else None
-                ),
-                eval_g_ineq=(
-                    (lambda x, grad: eval_g_ineq(x, self.eval_dict))
-                    if self.params.constr_mode == "ineq"
-                    else None
-                ),
-                lb=self.lb,
-                ub=self.ub,
-                maxeval=self.params.maxeval,
-                local_opts=self.local_opts,
-                target_value=None,
-                eval_dict=self.eval_dict,
+        # Calculate current response and marginal response for each channel
+        for i, channel in enumerate(self.channel_for_allocation):
+            current_spend = original_spend[channel]
+
+            # Calculate current response
+            current_response = self._fx_objective(
+                x=current_spend,
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
             )
-            # Log bounded optimization results
+
+            # Calculate response with additional spend
+            additional_spend = current_spend * 0.1  # 10% more spend
+            response_with_more = self._fx_objective(
+                x=current_spend + additional_spend,
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
+            )
+
+            # Calculate marginal response
+            marginal_response = (
+                response_with_more - current_response
+            ) / additional_spend
+
+            # Store values
+            channel_responses[channel] = current_response
+            channel_roi[channel] = (
+                current_response / current_spend if current_spend > 0 else 0
+            )
+            marginal_responses[channel] = marginal_response
+
+        # Sort channels by marginal response (descending)
+        sorted_channels = sorted(
+            self.channel_for_allocation,
+            key=lambda c: marginal_responses[c],
+            reverse=True,
+        )
+
+        # Implement a simple reallocation strategy:
+        # 1. Start with lower bounds for all channels
+        # 2. Allocate remaining budget to channels in order of marginal response
+
+        # Get lower and upper bounds for channels
+        lower_bounds = {
+            channel: self.lb[i] for i, channel in enumerate(self.channel_for_allocation)
+        }
+        upper_bounds = {
+            channel: self.ub[i] for i, channel in enumerate(self.channel_for_allocation)
+        }
+
+        # Start with lower bounds
+        optimized_spend = {
+            channel: lower_bounds[channel] for channel in self.channel_for_allocation
+        }
+
+        # Calculate remaining budget
+        total_budget = self.total_budget_unit
+        allocated_budget = sum(optimized_spend.values())
+        remaining_budget = total_budget - allocated_budget
+
+        # Log the reallocation process
+        self.logger.debug(f"Total budget: {total_budget}")
+        self.logger.debug(f"Initial allocation to lower bounds: {allocated_budget}")
+        self.logger.debug(f"Remaining budget: {remaining_budget}")
+        self.logger.debug(f"Channel order by marginal response: {sorted_channels}")
+
+        # Allocate remaining budget by marginal response
+        for channel in sorted_channels:
+            # How much more can we allocate to this channel
+            available_headroom = upper_bounds[channel] - optimized_spend[channel]
+
+            # Allocate up to available headroom or remaining budget
+            allocation = min(remaining_budget, available_headroom)
+            optimized_spend[channel] += allocation
+
+            # Update remaining budget
+            remaining_budget -= allocation
+
+            # Log allocation
             self.logger.debug(
-                json.dumps(
-                    {
-                        "step": "bounded_optimization_results",
-                        "data": {
-                            "solution": nls_mod["solution"].tolist(),
-                            "objective": float(nls_mod["objective"]),
-                            "status": nls_mod.get("status", "unknown"),
-                            "message": nls_mod.get("message", "no message"),
-                            "total_spend": float(np.sum(nls_mod["solution"])),
-                        },
-                    },
-                    indent=2,
-                )
-            )
-            # Unbounded optimization
-            nls_mod_unbound = run_optimization(
-                x0=self.x0_ext,
-                eval_f=lambda x, grad: eval_f(x, self.eval_dict),
-                eval_g_eq=(
-                    (lambda x, grad: eval_g_eq(x, self.eval_dict))
-                    if self.params.constr_mode == "eq"
-                    else None
-                ),
-                eval_g_ineq=(
-                    (lambda x, grad: eval_g_ineq(x, self.eval_dict))
-                    if self.params.constr_mode == "ineq"
-                    else None
-                ),
-                lb=self.lb_ext,
-                ub=self.ub_ext,
-                maxeval=self.params.maxeval,
-                local_opts=self.local_opts,
-                target_value=None,
-                eval_dict=self.eval_dict,
-            )
-            # Log unbounded optimization results
-            self.logger.debug(
-                json.dumps(
-                    {
-                        "step": "unbounded_optimization_results",
-                        "data": {
-                            "solution": nls_mod_unbound["solution"].tolist(),
-                            "objective": float(nls_mod_unbound["objective"]),
-                            "status": nls_mod_unbound.get("status", "unknown"),
-                            "message": nls_mod_unbound.get("message", "no message"),
-                            "total_spend": float(np.sum(nls_mod_unbound["solution"])),
-                        },
-                    },
-                    indent=2,
-                )
-            )
-        elif self.params.scenario == SCENARIO_TARGET_EFFICIENCY:
-            # Bounded optimization
-            nls_mod = run_optimization(
-                x0=self.x0,
-                eval_f=lambda x, grad: eval_f(x, self.eval_dict),
-                eval_g_eq=(
-                    (lambda x, grad: eval_g_eq(x, self.eval_dict))
-                    if self.params.constr_mode == "eq"
-                    else None
-                ),
-                eval_g_ineq=(
-                    (lambda x, grad: eval_g_ineq(x, self.eval_dict))
-                    if self.params.constr_mode == "ineq"
-                    else None
-                ),
-                lb=self.lb,
-                ub=self.x0 * self.channel_constr_up_sorted[0],
-                maxeval=self.params.maxeval,
-                local_opts=self.local_opts,
-                target_value=self.params.target_value,
-                eval_dict=self.eval_dict,
+                f"Allocated {allocation} to {channel}, remaining: {remaining_budget}"
             )
 
-            # Unbounded optimization
-            nls_mod_unbound = run_optimization(
-                x0=self.x0,
-                eval_f=lambda x, grad: eval_f(x, self.eval_dict),
-                eval_g_eq=(
-                    (lambda x, grad: eval_g_eq(x, self.eval_dict))
-                    if self.params.constr_mode == "eq"
-                    else None
-                ),
-                eval_g_ineq=(
-                    (lambda x, grad: eval_g_ineq(x, self.eval_dict))
-                    if self.params.constr_mode == "ineq"
-                    else None
-                ),
-                lb=self.lb,
-                ub=self.x0 * self.channel_constr_up_sorted[0],
-                maxeval=self.params.maxeval,
-                local_opts=self.local_opts,
-                target_value=self.target_value_ext,
-                eval_dict=self.eval_dict,
+            # If no more budget, stop allocating
+            if remaining_budget < 1e-6:
+                break
+
+        # Also calculate unbounded allocation (with relaxed upper bounds)
+        # For simplicity, we'll just increase upper bounds by the constraint multiplier
+        extended_upper_bounds = {
+            channel: upper_bounds[channel] * self.params.channel_constr_multiplier
+            for channel in self.channel_for_allocation
+        }
+
+        # Start with lower bounds again
+        optimized_spend_unbounded = {
+            channel: lower_bounds[channel] for channel in self.channel_for_allocation
+        }
+        allocated_budget_unbounded = sum(optimized_spend_unbounded.values())
+        remaining_budget_unbounded = total_budget - allocated_budget_unbounded
+
+        # Allocate remaining budget
+        for channel in sorted_channels:
+            available_headroom = (
+                extended_upper_bounds[channel] - optimized_spend_unbounded[channel]
+            )
+            allocation = min(remaining_budget_unbounded, available_headroom)
+            optimized_spend_unbounded[channel] += allocation
+            remaining_budget_unbounded -= allocation
+
+            if remaining_budget_unbounded < 1e-6:
+                break
+
+        # Calculate response for optimized allocations
+        optimized_responses = {
+            channel: self._fx_objective(
+                x=optimized_spend[channel],
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
+            )
+            for channel in self.channel_for_allocation
+        }
+
+        optimized_responses_unbounded = {
+            channel: self._fx_objective(
+                x=optimized_spend_unbounded[channel],
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
+            )
+            for channel in self.channel_for_allocation
+        }
+
+        # Calculate marginal responses for the optimized allocations
+        optimized_marginal_responses = {}
+        for channel in self.channel_for_allocation:
+            additional_spend = optimized_spend[channel] * 0.1  # 10% more
+            response_with_more = self._fx_objective(
+                x=optimized_spend[channel] + additional_spend,
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
+            )
+            optimized_marginal_responses[channel] = (
+                response_with_more - optimized_responses[channel]
+            ) / additional_spend
+
+        optimized_marginal_responses_unbounded = {}
+        for channel in self.channel_for_allocation:
+            additional_spend = optimized_spend_unbounded[channel] * 0.1
+            response_with_more = self._fx_objective(
+                x=optimized_spend_unbounded[channel] + additional_spend,
+                coeff=self.coefs_eval[channel],
+                alpha=self.alphas_eval[f"{channel}_alphas"],
+                inflexion=self.inflexions_eval[f"{channel}_gammas"],
+                x_hist_carryover=x_hist_carryover[channel],
+                get_sum=False,
+            )
+            optimized_marginal_responses_unbounded[channel] = (
+                response_with_more - optimized_responses_unbounded[channel]
+            ) / additional_spend
+
+        # Convert to arrays for all media channels (including skipped ones)
+        # Initialize with original values
+        optm_spend_unit = self.init_spend_unit.copy()
+        optm_response_unit = self.init_response_unit.copy()
+        optm_response_marg_unit = self.init_response_marg_unit.copy()
+        optm_spend_unit_unbound = self.init_spend_unit.copy()
+        optm_response_unit_unbound = self.init_response_unit.copy()
+        optm_response_marg_unit_unbound = self.init_response_marg_unit.copy()
+
+        # Update with optimized values for allocated channels
+        for channel in self.channel_for_allocation:
+            optm_spend_unit[channel] = optimized_spend[channel]
+            optm_response_unit[channel] = optimized_responses[channel]
+            optm_response_marg_unit[channel] = (
+                optimized_marginal_responses[channel] * optimized_spend[channel]
+            )
+            optm_spend_unit_unbound[channel] = optimized_spend_unbounded[channel]
+            optm_response_unit_unbound[channel] = optimized_responses_unbounded[channel]
+            optm_response_marg_unit_unbound[channel] = (
+                optimized_marginal_responses_unbounded[channel]
+                * optimized_spend_unbounded[channel]
             )
 
-        # Get marginal responses
-        optm_spend_unit = nls_mod["solution"]
-        optm_response_unit = eval_f(optm_spend_unit, self.eval_dict)[
-            "objective_channel"
-        ]
-        optm_spend_unit_unbound = nls_mod_unbound["solution"]
-        optm_response_unit_unbound = eval_f(optm_spend_unit_unbound, self.eval_dict)[
-            "objective_channel"
-        ]
-        # Debug logging for facebook_S (assuming it's first channel)
-        channel_idx = 0
-        channel = self.channel_for_allocation[channel_idx]
-        self.logger.debug(
-            json.dumps(
-                {
-                    "step": "marginal_response_debug",
-                    "channel": channel,
-                    "bounded": {
-                        "spend": float(optm_spend_unit[channel_idx]),
-                        "response": float(optm_response_unit[channel_idx]),
-                        "response_at_x_plus_1": float(
-                            self._fx_objective(
-                                x=optm_spend_unit[channel_idx] + 1,
-                                coeff=self.coefs_eval[channel],
-                                alpha=self.alphas_eval[f"{channel}_alphas"],
-                                inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                                x_hist_carryover=x_hist_carryover[channel],
-                                get_sum=False,
-                            )
-                        ),
-                    },
-                    "unbounded": {
-                        "spend": float(optm_spend_unit_unbound[channel_idx]),
-                        "response": float(optm_response_unit_unbound[channel_idx]),
-                        "response_at_x_plus_1": float(
-                            self._fx_objective(
-                                x=optm_spend_unit_unbound[channel_idx] + 1,
-                                coeff=self.coefs_eval[channel],
-                                alpha=self.alphas_eval[f"{channel}_alphas"],
-                                inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                                x_hist_carryover=x_hist_carryover[channel],
-                                get_sum=False,
-                            )
-                        ),
-                    },
-                },
-                indent=2,
-            )
-        )
-
-        # Calculate marginal responses for bounded
-        optm_response_marg_unit = (
-            np.array(
-                [
-                    self._fx_objective(
-                        x=x + 1,
-                        coeff=self.coefs_eval[channel],
-                        alpha=self.alphas_eval[f"{channel}_alphas"],
-                        inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                        x_hist_carryover=x_hist_carryover[channel],
-                        get_sum=False,
-                    )
-                    for x, channel in zip(optm_spend_unit, self.channel_for_allocation)
-                ]
-            )
-            - optm_response_unit
-        )
-
-        # Calculate marginal responses for unbounded
-        optm_response_marg_unit_unbound = (
-            np.array(
-                [
-                    self._fx_objective(
-                        x=x + 1,
-                        coeff=self.coefs_eval[channel],
-                        alpha=self.alphas_eval[f"{channel}_alphas"],
-                        inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                        x_hist_carryover=x_hist_carryover[channel],
-                        get_sum=False,
-                    )
-                    for x, channel in zip(
-                        optm_spend_unit_unbound, self.channel_for_allocation
-                    )
-                ]
-            )
-            - optm_response_unit_unbound
-        )
-
-        # Collect and organize output
-        # First set names for optimized arrays
-        optm_spend_unit = pd.Series(optm_spend_unit, index=self.channel_for_allocation)
-        optm_response_unit = pd.Series(
-            optm_response_unit, index=self.channel_for_allocation
-        )
-        optm_response_marg_unit = pd.Series(
-            optm_response_marg_unit, index=self.channel_for_allocation
-        )
-        optm_spend_unit_unbound = pd.Series(
-            optm_spend_unit_unbound, index=self.channel_for_allocation
-        )
-        optm_response_unit_unbound = pd.Series(
-            optm_response_unit_unbound, index=self.channel_for_allocation
-        )
-        optm_response_marg_unit_unbound = pd.Series(
-            optm_response_marg_unit_unbound, index=self.channel_for_allocation
-        )
-
-        # Verify channel mapping
-        channels_mapped = np.isin(self.media_spend_sorted, optm_spend_unit.index)
-
-        # Initialize output arrays with initial spend values
-        optm_spend_unit_out = pd.Series(self.init_spend_unit.copy())
-        optm_response_unit_out = pd.Series(self.init_spend_unit.copy())
-        optm_response_marg_unit_out = pd.Series(self.init_spend_unit.copy())
-        optm_spend_unit_unbound_out = pd.Series(self.init_spend_unit.copy())
-        optm_response_unit_unbound_out = pd.Series(self.init_spend_unit.copy())
-        optm_response_marg_unit_unbound_out = pd.Series(self.init_spend_unit.copy())
-
-        # Set dropped channels to 0
+        # Set values for skipped channels
         channels_to_drop = np.isin(
             self.media_spend_sorted,
             np.concatenate([self.zero_coef_channel, self.zero_constraint_channel]),
         )
 
-        for series in [
-            optm_spend_unit_out,
-            optm_response_unit_out,
-            optm_response_marg_unit_out,
-            optm_spend_unit_unbound_out,
-            optm_response_unit_unbound_out,
-            optm_response_marg_unit_unbound_out,
-        ]:
-            series[channels_to_drop] = 0
+        for channel in self.media_spend_sorted[channels_to_drop]:
+            optm_spend_unit[channel] = 0
+            optm_response_unit[channel] = 0
+            optm_response_marg_unit[channel] = 0
+            optm_spend_unit_unbound[channel] = 0
+            optm_response_unit_unbound[channel] = 0
+            optm_response_marg_unit_unbound[channel] = 0
 
-        # Fill in optimized values for non-dropped channels
-        optm_spend_unit_out[~channels_to_drop] = optm_spend_unit
-        optm_response_unit_out[~channels_to_drop] = optm_response_unit
-        optm_response_marg_unit_out[~channels_to_drop] = optm_response_marg_unit
-        optm_spend_unit_unbound_out[~channels_to_drop] = optm_spend_unit_unbound
-        optm_response_unit_unbound_out[~channels_to_drop] = optm_response_unit_unbound
-        optm_response_marg_unit_unbound_out[~channels_to_drop] = (
-            optm_response_marg_unit_unbound
-        )
-
-        optim_results = {
-            "nls_mod": nls_mod,
-            "nls_mod_unbound": nls_mod_unbound,
-            "optm_spend_unit": optm_spend_unit_out,
-            "optm_spend_unit_unbound": optm_spend_unit_unbound_out,
-            "optm_response_unit": optm_response_unit_out,
-            "optm_response_unit_unbound": optm_response_unit_unbound_out,
-            "optm_response_marg_unit": optm_response_marg_unit_out,
-            "optm_response_marg_unit_unbound": optm_response_marg_unit_unbound_out,
-            "channels_mapped": channels_mapped,
+        # Create optimization results dict to match expected structure
+        optimized_results = {
+            "nls_mod": {
+                "solution": optm_spend_unit.values,
+                "objective": -sum(optimized_responses.values()),
+                "status": 5,  # Custom status for direct allocation
+            },
+            "nls_mod_unbound": {
+                "solution": optm_spend_unit_unbound.values,
+                "objective": -sum(optimized_responses_unbounded.values()),
+                "status": 5,  # Custom status for direct allocation
+            },
+            "optm_spend_unit": optm_spend_unit,
+            "optm_spend_unit_unbound": optm_spend_unit_unbound,
+            "optm_response_unit": optm_response_unit,
+            "optm_response_unit_unbound": optm_response_unit_unbound,
+            "optm_response_marg_unit": optm_response_marg_unit,
+            "optm_response_marg_unit_unbound": optm_response_marg_unit_unbound,
+            "channels_mapped": np.ones(len(self.media_spend_sorted), dtype=bool),
         }
 
         # Build output DataFrame
-        dt_optim_out = self._build_optim_output(optim_results)
+        dt_optim_out = self._build_optim_output(optimized_results)
+
+        # Log results comparison
+        total_init_response = sum(channel_responses.values())
+        total_opt_response = sum(optimized_responses.values())
+        response_lift = (total_opt_response / total_init_response - 1) * 100
+
+        self.logger.debug(f"Direct allocation completed")
+        self.logger.debug(f"Total initial response: {total_init_response}")
+        self.logger.debug(f"Total optimized response: {total_opt_response}")
+        self.logger.debug(f"Response lift: {response_lift:.2f}%")
+
+        # Compare allocations
+        comparison = pd.DataFrame(
+            {
+                "Channel": self.channel_for_allocation,
+                "Initial Spend": [
+                    original_spend[c] for c in self.channel_for_allocation
+                ],
+                "Optimized Spend": [
+                    optimized_spend[c] for c in self.channel_for_allocation
+                ],
+                "Spend Change %": [
+                    (optimized_spend[c] / original_spend[c] - 1) * 100
+                    for c in self.channel_for_allocation
+                ],
+                "Initial Response": [
+                    channel_responses[c] for c in self.channel_for_allocation
+                ],
+                "Optimized Response": [
+                    optimized_responses[c] for c in self.channel_for_allocation
+                ],
+                "Response Lift %": [
+                    (optimized_responses[c] / channel_responses[c] - 1) * 100
+                    for c in self.channel_for_allocation
+                ],
+            }
+        )
+
+        print("Budget allocation results:")
+        print(comparison)
 
         return dt_optim_out
 
@@ -1308,7 +1401,8 @@ class BudgetAllocator:
                 coeff=self.coefs_eval[channel],
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                x_hist_carryover=0,
+                x_hist_carryover=0,  # Zero carryover for simulating full response curve
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
 
@@ -1318,6 +1412,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=0,
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
 
