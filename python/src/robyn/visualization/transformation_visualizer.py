@@ -704,19 +704,7 @@ class TransformationVisualizer(BaseVisualizer):
                     channel_data["rsq_train"].iloc[0] if not channel_data.empty else 0
                 )
 
-                # Add effect share row
-                bar_data_list.append(
-                    {
-                        "rn": channel,
-                        "nrmse": nrmse,
-                        "decomp.rssd": decomp_rssd,
-                        "rsq_train": rsq_train,
-                        "variable": "effect_share",
-                        "value": effect_share,
-                    }
-                )
-
-                # Add spend share row
+                # Add spend share row FIRST to match order in generate_spend_effect_comparison()
                 bar_data_list.append(
                     {
                         "rn": channel,
@@ -725,6 +713,18 @@ class TransformationVisualizer(BaseVisualizer):
                         "rsq_train": rsq_train,
                         "variable": "spend_share",
                         "value": spend_share,
+                    }
+                )
+
+                # Add effect share row SECOND
+                bar_data_list.append(
+                    {
+                        "rn": channel,
+                        "nrmse": nrmse,
+                        "decomp.rssd": decomp_rssd,
+                        "rsq_train": rsq_train,
+                        "variable": "effect_share",
+                        "value": effect_share,
                     }
                 )
 
