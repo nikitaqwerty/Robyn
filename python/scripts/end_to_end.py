@@ -30,6 +30,7 @@ from robyn.modeling.clustering.cluster_builder import ClusterBuilder
 from robyn.modeling.pareto.pareto_utils import ParetoUtils
 from robyn.visualization.cluster_visualizer import ClusterVisualizer
 from robyn.visualization.pareto_visualizer import ParetoVisualizer
+from robyn.visualization.transformation_visualizer import TransformationVisualizer
 from robyn.allocator.entities.allocation_params import AllocatorParams
 from robyn.allocator.constants import SCENARIO_MAX_RESPONSE, CONSTRAINT_MODE_EQ
 from robyn.allocator.allocator import BudgetAllocator
@@ -439,6 +440,11 @@ def main():
         pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0].sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
+
+    transformation_visualizer = TransformationVisualizer(pareto_result, mmm_data)
+    transformation_visualizer.plot_all(
+        select_model, display_plots=False, export_location=str(WORKING_DIR)
+    )
 
     OnePager(
         pareto_result, cluster_results, hyperparameters, mmm_data, holidays_data
