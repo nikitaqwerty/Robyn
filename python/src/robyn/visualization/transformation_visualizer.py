@@ -517,7 +517,7 @@ class TransformationVisualizer(BaseVisualizer):
         date_range: List[str],
         ax: Optional[plt.Axes] = None,
         metrics: Optional[Dict[str, float]] = None,
-    ) -> Optional[plt.Figure]:
+    ) -> Union[plt.Figure, bool]:
         """Generate comparison plot of spend share vs effect share for a specific date range.
 
         Args:
@@ -527,7 +527,7 @@ class TransformationVisualizer(BaseVisualizer):
             metrics: Optional dictionary containing model performance metrics
 
         Returns:
-            Optional[plt.Figure]: Generated matplotlib Figure object
+            Union[plt.Figure, bool]: Generated matplotlib Figure object or True if successful using provided axes
         """
         logger.debug(
             "Starting generation of date-filtered spend effect comparison plot"
@@ -568,7 +568,7 @@ class TransformationVisualizer(BaseVisualizer):
                     va="center",
                     transform=ax.transAxes,
                 )
-            return None
+            return False
 
         # Get model decomposition data and filter by date
         try:
@@ -596,28 +596,29 @@ class TransformationVisualizer(BaseVisualizer):
                         va="center",
                         transform=ax.transAxes,
                     )
-                return None
-                
+                return False
+
             # Get spend data for the filtered date range
             # First, try to get it from the mediaVecCollect data
             media_vec_collect = self.pareto_result.media_vec_collect[
-                (self.pareto_result.media_vec_collect["sol_id"] == solution_id) &
-                (self.pareto_result.media_vec_collect["type"] == "rawSpend")
+                (self.pareto_result.media_vec_collect["sol_id"] == solution_id)
+                & (self.pareto_result.media_vec_collect["type"] == "rawSpend")
             ].copy()
-            
+
             # Convert 'ds' to datetime and filter by date range
             if "ds" in media_vec_collect.columns:
                 media_vec_collect.loc[:, "ds"] = pd.to_datetime(media_vec_collect["ds"])
                 spend_filtered = media_vec_collect[
-                    (media_vec_collect["ds"] >= start_date) & (media_vec_collect["ds"] <= end_date)
+                    (media_vec_collect["ds"] >= start_date)
+                    & (media_vec_collect["ds"] <= end_date)
                 ]
             else:
                 # Fall back to original data
                 spend_filtered = None
-            
+
             # Calculate effect shares for the filtered date range
             paid_media_spends = self.mmm_data.mmmdata_spec.paid_media_spends
-            
+
             # Get effect values for each channel from the filtered data
             effect_values = {}
             total_effect = 0
@@ -626,11 +627,11 @@ class TransformationVisualizer(BaseVisualizer):
                     effect = date_filtered[channel].sum()
                     effect_values[channel] = effect
                     total_effect += effect
-            
+
             # Get spend values from the filtered data
             spend_values = {}
             total_spend = 0
-            
+
             # If we have spend_filtered data, use it to calculate spend shares
             if spend_filtered is not None and not spend_filtered.empty:
                 for channel in paid_media_spends:
@@ -643,11 +644,13 @@ class TransformationVisualizer(BaseVisualizer):
                 for channel in paid_media_spends:
                     channel_data = original_bar_data[original_bar_data["rn"] == channel]
                     if not channel_data.empty:
-                        spend_share = channel_data[channel_data["variable"] == "spend_share"]["value"].iloc[0]
+                        spend_share = channel_data[
+                            channel_data["variable"] == "spend_share"
+                        ]["value"].iloc[0]
                         # Relative spend share, will be normalized later
                         spend_values[channel] = spend_share
                         total_spend += spend_share
-            
+
             # Calculate metrics (ROI/CPA)
             # For ROI: effect / spend
             # For CPA: spend / effect
@@ -657,74 +660,90 @@ class TransformationVisualizer(BaseVisualizer):
                 if self.mmm_data.mmmdata_spec.dep_var_type == DependentVarType.REVENUE
                 else "cpa_total"
             )
-            
+
             for channel in paid_media_spends:
                 effect = effect_values.get(channel, 0)
                 spend = spend_values.get(channel, 0)
-                
+
                 if metric_type == "roi_total":
                     # ROI = effect / spend
                     metric_values[channel] = effect / spend if spend > 0 else 0
                 else:
                     # CPA = spend / effect
                     metric_values[channel] = spend / effect if effect > 0 else 0
-            
+
             # Create new DataFrames for bar and line data
             bar_data_list = []
             line_data_list = []
-            
+
             # Get list of channels in proper order
             channels = sorted(paid_media_spends)
-            
+
             # Convert to shares and create DataFrames
             for channel in channels:
                 # Get effect and spend shares
-                effect_share = effect_values.get(channel, 0) / total_effect if total_effect > 0 else 0
-                spend_share = spend_values.get(channel, 0) / total_spend if total_spend > 0 else 0
-                
+                effect_share = (
+                    effect_values.get(channel, 0) / total_effect
+                    if total_effect > 0
+                    else 0
+                )
+                spend_share = (
+                    spend_values.get(channel, 0) / total_spend if total_spend > 0 else 0
+                )
+
                 # Get metric value
                 metric_value = metric_values.get(channel, 0)
-                
+
                 # Get original values for nrmse, decomp.rssd, rsq_train from original data
                 channel_data = original_bar_data[original_bar_data["rn"] == channel]
                 nrmse = channel_data["nrmse"].iloc[0] if not channel_data.empty else 0
-                decomp_rssd = channel_data["decomp.rssd"].iloc[0] if not channel_data.empty else 0
-                rsq_train = channel_data["rsq_train"].iloc[0] if not channel_data.empty else 0
-                
+                decomp_rssd = (
+                    channel_data["decomp.rssd"].iloc[0] if not channel_data.empty else 0
+                )
+                rsq_train = (
+                    channel_data["rsq_train"].iloc[0] if not channel_data.empty else 0
+                )
+
                 # Add effect share row
-                bar_data_list.append({
-                    "rn": channel,
-                    "nrmse": nrmse,
-                    "decomp.rssd": decomp_rssd,
-                    "rsq_train": rsq_train,
-                    "variable": "effect_share",
-                    "value": effect_share
-                })
-                
+                bar_data_list.append(
+                    {
+                        "rn": channel,
+                        "nrmse": nrmse,
+                        "decomp.rssd": decomp_rssd,
+                        "rsq_train": rsq_train,
+                        "variable": "effect_share",
+                        "value": effect_share,
+                    }
+                )
+
                 # Add spend share row
-                bar_data_list.append({
-                    "rn": channel,
-                    "nrmse": nrmse,
-                    "decomp.rssd": decomp_rssd,
-                    "rsq_train": rsq_train,
-                    "variable": "spend_share",
-                    "value": spend_share
-                })
-                
+                bar_data_list.append(
+                    {
+                        "rn": channel,
+                        "nrmse": nrmse,
+                        "decomp.rssd": decomp_rssd,
+                        "rsq_train": rsq_train,
+                        "variable": "spend_share",
+                        "value": spend_share,
+                    }
+                )
+
                 # Add metric value row
-                line_data_list.append({
-                    "rn": channel,
-                    "nrmse": nrmse, 
-                    "decomp.rssd": decomp_rssd,
-                    "rsq_train": rsq_train,
-                    "variable": metric_type,
-                    "value": metric_value
-                })
-            
+                line_data_list.append(
+                    {
+                        "rn": channel,
+                        "nrmse": nrmse,
+                        "decomp.rssd": decomp_rssd,
+                        "rsq_train": rsq_train,
+                        "variable": metric_type,
+                        "value": metric_value,
+                    }
+                )
+
             # Create DataFrames from lists
             bar_data = pd.DataFrame(bar_data_list)
             line_data = pd.DataFrame(line_data_list)
-            
+
         except Exception as e:
             logger.error(f"Error filtering data by date range: {str(e)}")
             if ax:
@@ -736,7 +755,7 @@ class TransformationVisualizer(BaseVisualizer):
                     va="center",
                     transform=ax.transAxes,
                 )
-            return None
+            return False
 
         # Transform variable names
         bar_data["variable"] = bar_data["variable"].str.replace("_", " ").str.title()
@@ -744,8 +763,12 @@ class TransformationVisualizer(BaseVisualizer):
         # Create figure if no axes provided
         if ax is None:
             fig, ax = plt.subplots(figsize=(16, 10))
+            return_value = fig
         else:
             fig = None
+            return_value = (
+                True  # Return True to indicate success when using provided axes
+            )
 
         # Set background color
         ax.set_facecolor("white")
@@ -764,7 +787,7 @@ class TransformationVisualizer(BaseVisualizer):
         max_line_value = line_data["value"].max()
         if max_bar_value > 0 and max_line_value > 0:
             y_sec_scale = max_line_value / max_bar_value * 1.1
-        
+
         # Plot bars for each variable type
         bar_width = 0.35
         for i, (var, color) in enumerate(
@@ -908,7 +931,7 @@ class TransformationVisualizer(BaseVisualizer):
         logger.debug(
             "Successfully generated date-filtered spend effect comparison plot"
         )
-        return fig
+        return return_value
 
     def generate_quarterly_spend_effect_comparison(
         self,
@@ -949,15 +972,17 @@ class TransformationVisualizer(BaseVisualizer):
         for i, (quarter_range, quarter_name) in enumerate(zip(quarters, quarter_names)):
             try:
                 # Call method for date-filtered spend effect comparison
-                quarter_fig = self._generate_spend_effect_comparison_for_date_range(
-                    solution_id=solution_id,
-                    date_range=quarter_range,
-                    ax=axes[i],
-                    metrics=None,  # Don't add metrics to individual subplots
+                quarter_plot_success = (
+                    self._generate_spend_effect_comparison_for_date_range(
+                        solution_id=solution_id,
+                        date_range=quarter_range,
+                        ax=axes[i],
+                        metrics=None,  # Don't add metrics to individual subplots
+                    )
                 )
 
                 # If the plot generation failed, display an error message
-                if quarter_fig is None:
+                if quarter_plot_success is not True:
                     axes[i].text(
                         0.5,
                         0.5,
@@ -966,7 +991,7 @@ class TransformationVisualizer(BaseVisualizer):
                         va="center",
                         transform=axes[i].transAxes,
                     )
-                
+
                 # Adjust subplot title to be cleaner
                 axes[i].set_title(f"{year} {quarter_name}", pad=20, y=1.05)
 
@@ -1005,7 +1030,7 @@ class TransformationVisualizer(BaseVisualizer):
             )
             else "CPA"
         )
-        
+
         fig.suptitle(
             f"Quarterly Spend & Effect Share Comparison with {metric_type_display} for {year}\nSolution {solution_id}",
             fontsize=16,
