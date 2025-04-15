@@ -337,13 +337,13 @@ class TransformationVisualizer(BaseVisualizer):
                     marker="o",
                     linestyle="-",
                     markersize=8,
-                    label="ROAS",
+                    label=metric_type,
                 )
             ]
 
             # Combine legend elements in reverse order
             handles = line_legend + list(reversed(bars_legend[0]))
-            labels = ["ROAS"] + list(reversed(bars_legend[1]))
+            labels = [metric_type] + list(reversed(bars_legend[1]))
 
             # Create legend below title
             ax.legend(
@@ -908,7 +908,7 @@ class TransformationVisualizer(BaseVisualizer):
             )
         ]
 
-        # Combine legend elements
+        # Combine legend elements in reverse order (FIX HERE)
         handles = line_legend + list(reversed(bars_legend[0]))
         labels = [metric_type_display] + list(reversed(bars_legend[1]))
 
