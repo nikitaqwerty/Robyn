@@ -345,7 +345,7 @@ class TransformationVisualizer(BaseVisualizer):
             handles = line_legend + list(reversed(bars_legend[0]))
             labels = [metric_type] + list(reversed(bars_legend[1]))
 
-            # Create legend below title
+            # Create legend below title with added padding between handle and text
             ax.legend(
                 handles=handles,
                 labels=labels,
@@ -355,6 +355,7 @@ class TransformationVisualizer(BaseVisualizer):
                 ncol=3,
                 frameon=False,
                 borderaxespad=0,
+                handletextpad=0.5,  # Add padding between legend handle and text
             )
 
             # Add axis labels
@@ -888,11 +889,22 @@ class TransformationVisualizer(BaseVisualizer):
 
         # Add date range to title
         date_range_str = f" ({date_range[0]} to {date_range[1]})"
-        ax.set_title(
-            f"Share of Total Spend, Effect & {metric_type_display}{date_range_str}",
-            pad=20,
-            y=1.05,
-        )
+
+        # Set title position based on whether this is a standalone or quarterly subplot
+        if ax is None or fig is not None:
+            # Standalone chart with higher title position
+            ax.set_title(
+                f"Share of Total Spend, Effect & {metric_type_display}{date_range_str}",
+                pad=20,
+                y=1.05,
+            )
+        else:
+            # Quarterly subplot with adjusted title position
+            ax.set_title(
+                f"Share of Total Spend, Effect & {metric_type_display}{date_range_str}",
+                pad=30,  # More padding
+                y=1.15,  # Higher position
+            )
 
         # Create legend
         bars_legend = ax.get_legend_handles_labels()
@@ -912,17 +924,36 @@ class TransformationVisualizer(BaseVisualizer):
         handles = line_legend + list(reversed(bars_legend[0]))
         labels = [metric_type_display] + list(reversed(bars_legend[1]))
 
-        # Add legend
-        ax.legend(
-            handles=handles,
-            labels=labels,
-            bbox_to_anchor=(0, 1.05, 0.4, 0.1),
-            loc="lower left",
-            mode="expand",
-            ncol=3,
-            frameon=False,
-            borderaxespad=0,
-        )
+        # Add legend with better padding between handle and text and adjusted position
+        # For quarterly charts (when we're working with provided axes), position the legend lower
+        if ax is not None and fig is None:
+            # This is a subplot in the quarterly chart
+            ax.legend(
+                handles=handles,
+                labels=labels,
+                # Position the legend lower to avoid overlap with the title
+                bbox_to_anchor=(0, 0.98, 0.8, 0.1),  # Wider legend area (0.4 -> 0.8)
+                loc="lower left",
+                mode="expand",
+                ncol=3,
+                frameon=False,
+                borderaxespad=0,
+                handletextpad=1.0,  # Increased padding between handle and text
+                columnspacing=2.0,  # Added spacing between columns
+            )
+        else:
+            # This is a standalone chart
+            ax.legend(
+                handles=handles,
+                labels=labels,
+                bbox_to_anchor=(0, 1.05, 0.4, 0.1),
+                loc="lower left",
+                mode="expand",
+                ncol=3,
+                frameon=False,
+                borderaxespad=0,
+                handletextpad=0.5,  # Add padding between legend handle and text
+            )
 
         # Add axis labels
         ax.set_xlabel("Total Share by Channel")
@@ -992,8 +1023,8 @@ class TransformationVisualizer(BaseVisualizer):
                         transform=axes[i].transAxes,
                     )
 
-                # Adjust subplot title to be cleaner
-                axes[i].set_title(f"{year} {quarter_name}", pad=20, y=1.05)
+                # Set simplified title for quarterly charts
+                axes[i].set_title(f"{year} {quarter_name}", pad=20, y=1.15)
 
             except Exception as e:
                 logger.warning(
