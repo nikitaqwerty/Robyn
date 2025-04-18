@@ -883,6 +883,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
 
@@ -894,6 +895,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
 
@@ -999,6 +1001,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
             for channel in self.channel_for_allocation
@@ -1011,6 +1014,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
             for channel in self.channel_for_allocation
@@ -1026,6 +1030,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
             optimized_marginal_responses[channel] = (
@@ -1041,6 +1046,7 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=x_hist_carryover[channel],
+                theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
             optimized_marginal_responses_unbounded[channel] = (
@@ -1109,14 +1115,14 @@ class BudgetAllocator:
         dt_optim_out = self._build_optim_output(optimized_results)
 
         # Log results comparison
-        total_init_response = sum(channel_responses.values())
-        total_opt_response = sum(optimized_responses.values())
-        response_lift = (total_opt_response / total_init_response - 1) * 100
+        total_init_response = float(sum(channel_responses.values()))
+        total_opt_response = float(sum(optimized_responses.values()))
+        response_lift = float((total_opt_response / total_init_response - 1) * 100)
 
         self.logger.debug(f"Direct allocation completed")
         self.logger.debug(f"Total initial response: {total_init_response}")
         self.logger.debug(f"Total optimized response: {total_opt_response}")
-        self.logger.debug(f"Response lift: {response_lift:.2f}%")
+        self.logger.debug(f"Response lift: {response_lift:.2f}%")  # Now works correctly
 
         # Compare allocations
         comparison = pd.DataFrame(
@@ -1395,7 +1401,6 @@ class BudgetAllocator:
             )
             simulate_spend = np.linspace(0, max_x, 100)
 
-            # Calculate responses
             simulate_response = self._fx_objective(
                 x=simulate_spend,
                 coeff=self.coefs_eval[channel],
@@ -1416,15 +1421,27 @@ class BudgetAllocator:
                 get_sum=False,
             )
 
-            # Store simulation data
+            # Create arrays of consistent length
+            n = len(simulate_spend)
+            channel_array = [channel] * n
+            mean_carryover_array = [carryover_mean] * n
+            carryover_response_array = [simulate_response_carryover] * n
+
+            # Handle the case where simulate_response might be a scalar instead of an array
+            if np.isscalar(simulate_response) or len(simulate_response) != n:
+                total_response_array = [simulate_response] * n
+            else:
+                total_response_array = simulate_response
+
+            # Store simulation data with consistent array lengths
             plot_dt_scurve.append(
                 pd.DataFrame(
                     {
-                        "channel": channel,
+                        "channel": channel_array,
                         "spend": simulate_spend,
-                        "mean_carryover": carryover_mean,
-                        "carryover_response": simulate_response_carryover,
-                        "total_response": simulate_response,
+                        "mean_carryover": mean_carryover_array,
+                        "carryover_response": carryover_response_array,
+                        "total_response": total_response_array,
                     }
                 )
             )
