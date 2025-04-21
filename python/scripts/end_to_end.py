@@ -44,11 +44,11 @@ from robyn.reporting.onepager_reporting import OnePager
 BASE_PATH = Path("../mmm")
 
 # Basic configuration
-VERSION = "0.6.test"
+VERSION = "0.8.test"
 DATA_PATH = BASE_PATH / f'data/{".".join(VERSION.split(".")[0:2])}'
 WORKING_DIR = BASE_PATH / f"output/robyn_output_{VERSION}"
 START_DATE = "2022-05-01"
-END_DATE = "2025-01-01"
+END_DATE = "2025-03-31"
 
 # Channel-specific hyperparameters
 CHANNEL_HYPERPARAMETERS = {
@@ -77,7 +77,12 @@ CHANNEL_HYPERPARAMETERS = {
         "gammas": [0.3, 1],
         "thetas": [0.3, 0.9],
     },
-    "Offline_spend": {
+    "OfflineTV_spend": {
+        "alphas": [0.5, 3],
+        "gammas": [0.3, 1],
+        "thetas": [0.3, 0.9],
+    },
+    "OfflineOutdoor_spend": {
         "alphas": [0.5, 3],
         "gammas": [0.3, 1],
         "thetas": [0.3, 0.9],
@@ -90,19 +95,19 @@ LAMBDA_RANGE = [0, 1]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 3000, "trials": 2}
+TRIALS_CONFIG = {"iterations": 5000, "trials": 2}
 
 MODEL_EXECUTION_PARAMS = {
     "ts_validation": True,
     "add_penalty_factor": False,
     "rssd_zero_penalty": True,
     "nevergrad_algo": NevergradAlgorithm.TWO_POINTS_DE,
-    "objective_weights": [1, 1],
+    "objective_weights": [5, 1],
     "model_name": Models.RIDGE,
     "cores": 16,
     "seed": [42],
-    "val_size": 5,
-    "test_size": 5,
+    "val_size": 10,
+    "test_size": 10,
     "fixed_coefficients": {"AffiliatesCPA_spend": 6952.199400},
     "fixed_intercept": 843.66,
 }
@@ -119,8 +124,24 @@ BUDGET_ALLOCATION_PARAMS = {
     "scenario": SCENARIO_MAX_RESPONSE,
     "total_budget": None,  # Uses total spend in date_range when None
     "date_range": "last",
-    "channel_constr_low": [0.75, 0.75, 0.75, 0.75, 1, 1],  # Minimum spend multiplier
-    "channel_constr_up": [1.25, 1.25, 1.25, 1.25, 1, 1],  # Maximum spend multiplier
+    "channel_constr_low": [
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        0.75,
+        1,
+        1,
+    ],  # Minimum spend multiplier
+    "channel_constr_up": [
+        1.25,
+        1.25,
+        1.25,
+        1.25,
+        1.25,
+        1,
+        1,
+    ],  # Maximum spend multiplier
     "channel_constr_multiplier": 1.5,
     "optim_algo": "SLSQP_AUGLAG",
     "maxeval": 100000,
@@ -367,7 +388,7 @@ def main():
 
     # Analyze time series data
     def reshape_and_analyze_ts_data(df):
-        """Reshape melted time series data and calculate metrics for the last 10 rows."""
+        """Reshape melted time series data and calculate metrics based on val_size and test_size."""
         # Reshape from long to wide format
         wide_df = df.pivot(index="ds", columns="variable", values="value").reset_index()
 
@@ -377,32 +398,40 @@ def main():
         # Sort by date ascending
         wide_df = wide_df.sort_values("ds")
 
-        # Get the last 10 rows
-        last_10 = wide_df.tail(10)
+        # Calculate total validation and test size
+        total_val_test_size = (
+            MODEL_EXECUTION_PARAMS["val_size"] + MODEL_EXECUTION_PARAMS["test_size"]
+        )
 
-        # Calculate metrics on the last 10 rows
+        # Get the last rows based on validation and test size
+        last_n = wide_df.tail(total_val_test_size)
+
+        # Calculate metrics on these rows
         metrics = {}
 
         # Mean Absolute Error
-        metrics["mae"] = mean_absolute_error(last_10["actual"], last_10["predicted"])
+        metrics["mae"] = mean_absolute_error(last_n["actual"], last_n["predicted"])
 
         # Root Mean Square Error
         metrics["rmse"] = np.sqrt(
-            mean_squared_error(last_10["actual"], last_10["predicted"])
+            mean_squared_error(last_n["actual"], last_n["predicted"])
         )
 
         # R-squared
-        metrics["r2"] = r2_score(last_10["actual"], last_10["predicted"])
+        metrics["r2"] = r2_score(last_n["actual"], last_n["predicted"])
 
-        return last_10, metrics
+        return last_n, metrics
 
-    last_10_rows, metrics = reshape_and_analyze_ts_data(ts_data)
+    last_n_rows, metrics = reshape_and_analyze_ts_data(ts_data)
 
     # Display the results for original data
-    print("Original Data - Metrics for the last 10 data points:")
+    total_val_test_size = (
+        MODEL_EXECUTION_PARAMS["val_size"] + MODEL_EXECUTION_PARAMS["test_size"]
+    )
+    print(f"Original Data - Metrics for the last {total_val_test_size} data points:")
     print(f"MAE: {metrics['mae']:.4f}")
     print(f"R2: {metrics['r2']:.4f}")
-    print(last_10_rows)
+    print(last_n_rows)
 
     pareto_result.result_hyp_param.to_csv(
         WORKING_DIR / "pareto_result_result_hyp_param.csv"
