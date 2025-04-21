@@ -44,7 +44,7 @@ from robyn.reporting.onepager_reporting import OnePager
 BASE_PATH = Path("../mmm")
 
 # Basic configuration
-VERSION = "0.8.test"
+VERSION = "0.8.test5"
 DATA_PATH = BASE_PATH / f'data/{".".join(VERSION.split(".")[0:2])}'
 WORKING_DIR = BASE_PATH / f"output/robyn_output_{VERSION}"
 START_DATE = "2022-05-01"
@@ -77,6 +77,11 @@ CHANNEL_HYPERPARAMETERS = {
         "gammas": [0.3, 1],
         "thetas": [0.3, 0.9],
     },
+    "EsportsSponsorships_spend": {
+        "alphas": [0.5, 3],
+        "gammas": [0.3, 1],
+        "thetas": [0.3, 0.9],
+    },
     "OfflineTV_spend": {
         "alphas": [0.5, 3],
         "gammas": [0.3, 1],
@@ -91,11 +96,11 @@ CHANNEL_HYPERPARAMETERS = {
 
 # General model hyperparameters
 ADSTOCK_TYPE = AdstockType.GEOMETRIC
-LAMBDA_RANGE = [0, 1]
+LAMBDA_RANGE = [0, 0.5]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 5000, "trials": 2}
+TRIALS_CONFIG = {"iterations": 20000, "trials": 2}
 
 MODEL_EXECUTION_PARAMS = {
     "ts_validation": True,
@@ -106,10 +111,10 @@ MODEL_EXECUTION_PARAMS = {
     "model_name": Models.RIDGE,
     "cores": 16,
     "seed": [42],
-    "val_size": 10,
-    "test_size": 10,
+    "val_size": 5,
+    "test_size": 5,
     "fixed_coefficients": {"AffiliatesCPA_spend": 6952.199400},
-    "fixed_intercept": 843.66,
+    "fixed_intercept": 1250.0,
 }
 
 # Clustering parameters
@@ -132,6 +137,7 @@ BUDGET_ALLOCATION_PARAMS = {
         0.75,
         1,
         1,
+        1,
     ],  # Minimum spend multiplier
     "channel_constr_up": [
         1.25,
@@ -139,6 +145,7 @@ BUDGET_ALLOCATION_PARAMS = {
         1.25,
         1.25,
         1.25,
+        1,
         1,
         1,
     ],  # Maximum spend multiplier
@@ -310,7 +317,7 @@ def main():
         val_size=MODEL_EXECUTION_PARAMS["val_size"],
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
         # fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
-        # fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
+        fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
     )
 
     # Display model output summaries
@@ -403,8 +410,11 @@ def main():
             MODEL_EXECUTION_PARAMS["val_size"] + MODEL_EXECUTION_PARAMS["test_size"]
         )
 
-        # Get the last rows based on validation and test size
-        last_n = wide_df.tail(total_val_test_size)
+        # Get the last rows based on validation and test size - create an explicit copy
+        last_n = wide_df.tail(total_val_test_size).copy()
+
+        # Get training data (everything except validation + test)
+        train_df = wide_df.iloc[:-total_val_test_size].copy()
 
         # Calculate metrics on these rows
         metrics = {}
@@ -419,6 +429,91 @@ def main():
 
         # R-squared
         metrics["r2"] = r2_score(last_n["actual"], last_n["predicted"])
+
+        # Calculate MAE using the mean of last total_val_test_size weeks as prediction
+        try:
+            # Get the mean of the last total_val_test_size periods from training data
+            mean_baseline = train_df.tail(total_val_test_size)["actual"].mean()
+
+            # Create a column of predictions using this mean - use loc to avoid warning
+            last_n.loc[:, "mean_prediction"] = mean_baseline
+
+            # Calculate MAE for this baseline approach
+            metrics["mean_baseline_mae"] = mean_absolute_error(
+                last_n["actual"], last_n["mean_prediction"]
+            )
+            print(f"Mean Baseline MAE: {metrics['mean_baseline_mae']:.4f}")
+        except Exception as e:
+            print(f"Error calculating Mean Baseline MAE: {e}")
+            metrics["mean_baseline_mae"] = None
+
+        # Calculate MAE using Prophet predictions fitted on all previous data
+        try:
+            # Import Prophet
+            from prophet import Prophet
+
+            # Prepare data for Prophet format (ds, y)
+            prophet_df = train_df[["ds", "actual"]].rename(columns={"actual": "y"})
+
+            # Check if there are any extreme values that could affect modeling
+            y_median = prophet_df["y"].median()
+            y_std = prophet_df["y"].std()
+
+            # Cap extreme values to improve prediction stability
+            prophet_df["y"] = prophet_df["y"].clip(
+                lower=max(0, y_median - 3 * y_std), upper=y_median + 3 * y_std
+            )
+
+            # Fit Prophet model with optimized parameters
+            model = Prophet(
+                changepoint_prior_scale=0.05,
+                seasonality_prior_scale=0.1,
+                weekly_seasonality=True,
+                daily_seasonality=False,
+                seasonality_mode="additive",
+            )
+
+            # Add country-specific holidays if relevant
+            try:
+                if "holidays_data" in globals() and hasattr(
+                    holidays_data, "dt_holidays"
+                ):
+                    holiday_df = holidays_data.dt_holidays.copy()
+                    if "ds" in holiday_df.columns and "holiday" in holiday_df.columns:
+                        model.add_country_holidays(country_name="RU")
+            except Exception as holiday_error:
+                print(f"Could not add holidays: {holiday_error}")
+
+            # Add yearly seasonality manually
+            model.add_seasonality(name="yearly", period=365.25, fourier_order=5)
+
+            # Fit the model
+            model.fit(prophet_df)
+
+            # Make predictions for validation + test period
+            future_dates = pd.DataFrame({"ds": pd.to_datetime(last_n["ds"])})
+            forecast = model.predict(future_dates)
+
+            # Add prophet predictions to last_n dataframe - use loc to avoid warning
+            last_n.loc[:, "prophet_prediction"] = forecast["yhat"].values
+
+            # Calculate MAE using Prophet predictions
+            metrics["prophet_mae"] = mean_absolute_error(
+                last_n["actual"], last_n["prophet_prediction"]
+            )
+            print(f"Prophet MAE: {metrics['prophet_mae']:.4f}")
+
+            # Print component contributions for debugging
+            print("Prophet forecast components:")
+            component_cols = ["ds", "yhat", "trend"]
+            for col in ["yearly", "weekly"]:
+                if col in forecast.columns:
+                    component_cols.append(col)
+            print(forecast[component_cols].head())
+        except Exception as e:
+            # If there's an error, log it and report None
+            print(f"Error calculating Prophet MAE: {e}")
+            metrics["prophet_mae"] = None
 
         return last_n, metrics
 
@@ -466,9 +561,7 @@ def main():
 
     # Select model for budget allocation
     select_model = (
-        pareto_result.result_hyp_param.sort_values("error_score", ascending=True)
-        .iloc[0]
-        .sol_id
+        pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0].sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
 
