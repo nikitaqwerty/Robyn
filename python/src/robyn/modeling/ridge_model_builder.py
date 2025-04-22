@@ -162,9 +162,11 @@ class RidgeModelBuilder:
         test_size: int = 5,
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
+        reinit_nevergrad_between_trials: bool = False,
     ) -> ModelOutputs:
         start_time = time.time()
 
+        # Initialize hyperparameters with flattened structure
         hyper_collect = self.ridge_data_builder._hyper_collector(
             self.hyperparameters,
             ts_validation,
@@ -173,8 +175,10 @@ class RidgeModelBuilder:
             cores,
         )
 
-        trials = []
-        for trial in range(1, trials_config.trials + 1):
+        # Initialize Nevergrad optimizer once if not reinitializing between trials
+        optimizer = None
+        objective_weights_eff = None
+        if not reinit_nevergrad_between_trials:
             optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
                 hyper_collect=hyper_collect,
                 iterations=trials_config.iterations,
@@ -183,6 +187,20 @@ class RidgeModelBuilder:
                 calibration_input=self.calibration_input,
                 objective_weights=objective_weights,
             )
+
+        # Run trials
+        trials = []
+        for trial in range(1, trials_config.trials + 1):
+            # Reinitialize optimizer for each trial if requested
+            if reinit_nevergrad_between_trials:
+                optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
+                    hyper_collect=hyper_collect,
+                    iterations=trials_config.iterations,
+                    cores=cores,
+                    nevergrad_algo=nevergrad_algo,
+                    calibration_input=self.calibration_input,
+                    objective_weights=objective_weights,
+                )
 
             trial_result = self.ridge_model_evaluator._run_nevergrad_optimization(
                 optimizer=optimizer,
@@ -206,7 +224,6 @@ class RidgeModelBuilder:
                 fixed_intercept=fixed_intercept,
             )
             trials.append(trial_result)
-
         # Calculate convergence
         convergence = Convergence()
         convergence_results = convergence.calculate_convergence(trials)
