@@ -100,10 +100,10 @@ LAMBDA_RANGE = [0, 0.5]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters
-TRIALS_CONFIG = {"iterations": 20000, "trials": 2}
+TRIALS_CONFIG = {"iterations": 500, "trials": 1}
 
 MODEL_EXECUTION_PARAMS = {
-    "ts_validation": True,
+    "ts_validation": False,
     "add_penalty_factor": False,
     "rssd_zero_penalty": True,
     "nevergrad_algo": NevergradAlgorithm.TWO_POINTS_DE,

@@ -536,12 +536,13 @@ class ParetoVisualizer(BaseVisualizer):
 
         return None
 
-    def get_last_calendar_year_quarters(self) -> List[List[str]]:
+    def get_last_four_quarters(self) -> List[List[str]]:
         """
-        Get date ranges for the four quarters of the last complete calendar year.
+        Get date ranges for the last four quarters counting backward from the latest date.
 
         Returns:
             List of four date ranges, each containing [start_date, end_date] as strings.
+            The quarters are ordered from oldest to newest.
         """
         # Get the available dates from the data
         ts_data = None
@@ -564,40 +565,61 @@ class ParetoVisualizer(BaseVisualizer):
 
         if ts_data is None or len(ts_data) == 0:
             logger.warning(
-                "Could not find date information to determine last calendar year quarters."
+                "Could not find date information to determine last four quarters."
             )
-            # Return default dates for previous year's quarters (fallback)
-            year = pd.Timestamp.now().year - 1
-            return [
-                [f"{year}-01-01", f"{year}-03-31"],
-                [f"{year}-04-01", f"{year}-06-30"],
-                [f"{year}-07-01", f"{year}-09-30"],
-                [f"{year}-10-01", f"{year}-12-31"],
-            ]
+            # Return default dates (fallback to today)
+            ref_date = pd.Timestamp.now()
+        else:
+            # Find the latest date in the data and add 7 days (to account for the week ending)
+            ref_date = pd.Timestamp(max(ts_data)) + pd.Timedelta(days=7)
 
-        # Find the most recent complete calendar year in the data
-        max_date = pd.Timestamp(max(ts_data))
-        min_date = pd.Timestamp(min(ts_data))
+        # Calculate current quarter information
+        current_year = ref_date.year
+        current_quarter = (ref_date.month - 1) // 3 + 1
 
-        # Find the most recent year that has all quarters (at least partially) covered
-        last_year = max_date.year
-        if (
-            max_date.month < 12
-        ):  # If current year doesn't have Q4 data, use previous year
-            last_year -= 1
+        # Generate the last four quarters
+        quarters = []
+        for i in range(4):
+            # Calculate quarter and year (counting backward)
+            quarter = current_quarter - i
+            year = current_year
 
-        # Ensure the chosen year has data (at least check if the year is within the data range)
-        if pd.Timestamp(f"{last_year}-01-01") < min_date:
-            # If earliest data is after the start of the chosen year, adjust to use the year of the earliest data
-            last_year = min_date.year
+            # Adjust for previous year if needed
+            while quarter <= 0:
+                quarter += 4
+                year -= 1
 
-        # Define the quarters
-        q1 = [f"{last_year}-01-01", f"{last_year}-03-31"]
-        q2 = [f"{last_year}-04-01", f"{last_year}-06-30"]
-        q3 = [f"{last_year}-07-01", f"{last_year}-09-30"]
-        q4 = [f"{last_year}-10-01", f"{last_year}-12-31"]
+            # Calculate start and end months
+            start_month = (quarter - 1) * 3 + 1
+            end_month = quarter * 3
 
-        return [q1, q2, q3, q4]
+            # Create start and end dates
+            start_date = pd.Timestamp(f"{year}-{start_month:02d}-01")
+
+            # End date is the last day of the end month
+            if end_month == 12:
+                end_date = pd.Timestamp(f"{year}-12-31")
+            else:
+                next_month_year = year
+                next_month = end_month + 1
+                if next_month > 12:
+                    next_month = 1
+                    next_month_year += 1
+                end_date = pd.Timestamp(
+                    f"{next_month_year}-{next_month:02d}-01"
+                ) - pd.Timedelta(days=1)
+
+            # For the most recent quarter (i==0), cap at the reference date
+            if i == 0 and end_date > ref_date:
+                end_date = ref_date
+
+            # Add to list
+            quarters.append(
+                [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+            )
+
+        # Return quarters from oldest to newest
+        return sorted(quarters, key=lambda x: x[0])
 
     def generate_quarterly_waterfall(
         self,
@@ -606,7 +628,7 @@ class ParetoVisualizer(BaseVisualizer):
         metrics: Optional[Dict[str, float]] = None,
     ) -> Optional[plt.Figure]:
         """
-        Generate waterfall charts for each quarter of the last calendar year in a 2x2 grid.
+        Generate waterfall charts for the last four quarters in a 2x2 grid.
 
         Args:
             solution_id: ID of the solution to visualize
@@ -635,18 +657,24 @@ class ParetoVisualizer(BaseVisualizer):
             return None
 
         # Get quarterly date ranges
-        quarters = self.get_last_calendar_year_quarters()
-        quarter_names = ["Q1", "Q2", "Q3", "Q4"]
-        year = quarters[0][0].split("-")[
-            0
-        ]  # Extract year from first quarter's start date
+        quarters = self.get_last_four_quarters()
+
+        # Extract dates for quarter labels
+        quarter_labels = []
+        for quarter_range in quarters:
+            start_date = pd.to_datetime(quarter_range[0])
+            end_date = pd.to_datetime(quarter_range[1])
+            quarter_num = (start_date.month - 1) // 3 + 1
+            quarter_labels.append(f"Q{quarter_num} {start_date.year}")
 
         # Create a figure with 2x2 grid
         fig, axes = plt.subplots(2, 2, figsize=(20, 16))
         axes = axes.flatten()
 
         # Generate waterfall for each quarter
-        for i, (quarter_range, quarter_name) in enumerate(zip(quarters, quarter_names)):
+        for i, (quarter_range, quarter_label) in enumerate(
+            zip(quarters, quarter_labels)
+        ):
             try:
                 # Call existing method for date range, but don't pass metrics to individual subplots
                 self.generate_waterfall_for_date_range(
@@ -657,18 +685,17 @@ class ParetoVisualizer(BaseVisualizer):
                     metrics=None,  # Don't add metrics to individual subplots
                 )
 
-                # Adjust subplot title to be cleaner
-                quarter_title = f"{year} {quarter_name}"
-                axes[i].set_title(quarter_title, pad=20, y=1.05)
+                # Set subplot title
+                axes[i].set_title(quarter_label, pad=20, y=1.05)
 
             except Exception as e:
                 logger.warning(
-                    f"Error generating quarterly waterfall for {quarter_name}: {e}"
+                    f"Error generating quarterly waterfall for {quarter_label}: {e}"
                 )
                 axes[i].text(
                     0.5,
                     0.5,
-                    f"Error generating {quarter_name} waterfall",
+                    f"Error generating {quarter_label} waterfall",
                     ha="center",
                     va="center",
                     transform=axes[i].transAxes,
@@ -686,9 +713,14 @@ class ParetoVisualizer(BaseVisualizer):
                     wrap=True,
                 )
 
+        # Get date range for overall title
+        earliest_date = pd.to_datetime(quarters[0][0])
+        latest_date = pd.to_datetime(quarters[-1][1])
+        date_range_str = f"{earliest_date.strftime('%Y-%m-%d')} to {latest_date.strftime('%Y-%m-%d')}"
+
         # Add overall title
         fig.suptitle(
-            f"Quarterly Response Decomposition Waterfall Charts for {year}\nSolution {solution_id}",
+            f"Last Four Quarters Response Decomposition Waterfall Charts\n{date_range_str}\nSolution {solution_id}",
             fontsize=16,
             y=0.98,
         )
@@ -703,7 +735,7 @@ class ParetoVisualizer(BaseVisualizer):
             top=0.85, wspace=0.3, hspace=0.4
         )  # Make room for overall title and metrics
 
-        logger.debug(f"Successfully generated quarterly waterfall plots for {year}")
+        logger.debug(f"Successfully generated quarterly waterfall plots")
         return fig
 
     def generate_fitted_vs_actual(
