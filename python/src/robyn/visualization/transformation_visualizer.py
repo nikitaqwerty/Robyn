@@ -385,133 +385,6 @@ class TransformationVisualizer(BaseVisualizer):
                 )
             return None
 
-    def _get_last_calendar_year_quarters(self) -> List[List[str]]:
-        """
-        Get date ranges for the four quarters of the last complete calendar year.
-
-        Returns:
-            List of four date ranges, each containing [start_date, end_date] as strings.
-        """
-        # Get the available dates from the data
-        ts_data = None
-
-        # Try to get dates from mmm_data
-        if (
-            self.mmm_data
-            and hasattr(self.mmm_data, "dt")
-            and "ds" in self.mmm_data.dt.columns
-        ):
-            # Get dates directly from mmm_data
-            ts_data = pd.to_datetime(self.mmm_data.dt["ds"].unique())
-
-        if ts_data is None or len(ts_data) == 0:
-            logger.warning(
-                "Could not find date information to determine last calendar year quarters."
-            )
-            # Return default dates for previous year's quarters (fallback)
-            year = pd.Timestamp.now().year - 1
-            return [
-                [f"{year}-01-01", f"{year}-03-31"],
-                [f"{year}-04-01", f"{year}-06-30"],
-                [f"{year}-07-01", f"{year}-09-30"],
-                [f"{year}-10-01", f"{year}-12-31"],
-            ]
-
-        # Find the most recent complete calendar year in the data
-        max_date = pd.Timestamp(max(ts_data))
-        min_date = pd.Timestamp(min(ts_data))
-
-        # Find the most recent year that has all quarters (at least partially) covered
-        last_year = max_date.year
-        if (
-            max_date.month < 12
-        ):  # If current year doesn't have Q4 data, use previous year
-            last_year -= 1
-
-        # Ensure the chosen year has data
-        if pd.Timestamp(f"{last_year}-01-01") < min_date:
-            # If earliest data is after the start of the chosen year, adjust
-            last_year = min_date.year
-
-        # Define the quarters
-        q1 = [f"{last_year}-01-01", f"{last_year}-03-31"]
-        q2 = [f"{last_year}-04-01", f"{last_year}-06-30"]
-        q3 = [f"{last_year}-07-01", f"{last_year}-09-30"]
-        q4 = [f"{last_year}-10-01", f"{last_year}-12-31"]
-
-        return [q1, q2, q3, q4]
-
-    def _add_metrics_to_plot(
-        self, fig: plt.Figure, metrics: Dict[str, float], solution_id: str
-    ) -> None:
-        """
-        Helper method to add metrics text to a plot in the top right corner.
-
-        Args:
-            fig: matplotlib Figure object
-            metrics: Dictionary of metric values
-            solution_id: Solution ID string
-        """
-        if not metrics:
-            return
-
-        # Get metrics to display, using NaN for missing metrics
-        metrics_to_display = {
-            k: metrics.get(k, float("nan"))  # Use NaN for missing metrics
-            for k in [
-                "rsq_train",
-                "rsq_val",
-                "rsq_test",
-                "nrmse",
-                "nrmse_train",
-                "nrmse_val",
-                "nrmse_test",
-                "decomp.rssd",
-                "mae",
-            ]
-        }
-
-        # Format metrics as text lines
-        metrics_str_lines = [
-            f"Metrics for Solution {solution_id}",
-            f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
-            f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
-            f"MAE: {metrics_to_display['mae']:.3f}",
-            f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}",
-        ]
-
-        # Set position for metrics text (top right corner)
-        x_pos = 0.98  # Right side of figure
-        y_start = 0.98  # Top of figure
-        line_spacing = 0.025  # Space between lines
-
-        # Create a common bbox style for all text elements
-        metrics_box = dict(
-            facecolor="white",
-            alpha=0.8,
-            edgecolor="lightgray",
-            boxstyle="round,pad=0.3",
-        )
-
-        # Add each metrics line with background box
-        for i, line in enumerate(metrics_str_lines):
-            # First line (title) is bold
-            weight = "bold" if i == 0 else "normal"
-            fontsize = 10 if i == 0 else 9
-            color = "black" if i == 0 else "grey"
-
-            fig.text(
-                x_pos,
-                y_start - (i * line_spacing),
-                line,
-                ha="right",  # Right-aligned text
-                va="top",
-                fontsize=fontsize,
-                weight=weight,
-                color=color,
-                bbox=metrics_box,  # Add box to all lines for better visibility
-            )
-
     def _generate_spend_effect_comparison_for_date_range(
         self,
         solution_id: str,
@@ -964,13 +837,98 @@ class TransformationVisualizer(BaseVisualizer):
         )
         return return_value
 
+    def _get_last_four_quarters(self) -> List[List[str]]:
+        """
+        Get date ranges for the last four quarters counting backward from the latest date.
+
+        Returns:
+            List of four date ranges, each containing [start_date, end_date] as strings.
+            The quarters are ordered from oldest to newest.
+        """
+        # Get the available dates from the data
+        ts_data = None
+
+        # Try to get dates from decomp_vec if available
+        if (
+            hasattr(self.pareto_result, "x_decomp_vec_collect")
+            and not self.pareto_result.x_decomp_vec_collect.empty
+        ):
+            ts_data = pd.to_datetime(
+                self.pareto_result.x_decomp_vec_collect["ds"].unique()
+            )
+        elif (
+            self.mmm_data
+            and hasattr(self.mmm_data, "dt")
+            and "ds" in self.mmm_data.dt.columns
+        ):
+            # Get dates directly from mmm_data
+            ts_data = pd.to_datetime(self.mmm_data.dt["ds"].unique())
+
+        if ts_data is None or len(ts_data) == 0:
+            logger.warning(
+                "Could not find date information to determine last four quarters."
+            )
+            # Return default dates (fallback to today)
+            ref_date = pd.Timestamp.now()
+        else:
+            # Find the latest date in the data and add 7 days (to account for the week ending)
+            ref_date = pd.Timestamp(max(ts_data)) + pd.Timedelta(days=7)
+
+        # Calculate current quarter information
+        current_year = ref_date.year
+        current_quarter = (ref_date.month - 1) // 3 + 1
+
+        # Generate the last four quarters
+        quarters = []
+        for i in range(4):
+            # Calculate quarter and year (counting backward)
+            quarter = current_quarter - i
+            year = current_year
+
+            # Adjust for previous year if needed
+            while quarter <= 0:
+                quarter += 4
+                year -= 1
+
+            # Calculate start and end months
+            start_month = (quarter - 1) * 3 + 1
+            end_month = quarter * 3
+
+            # Create start and end dates
+            start_date = pd.Timestamp(f"{year}-{start_month:02d}-01")
+
+            # End date is the last day of the end month
+            if end_month == 12:
+                end_date = pd.Timestamp(f"{year}-12-31")
+            else:
+                next_month_year = year
+                next_month = end_month + 1
+                if next_month > 12:
+                    next_month = 1
+                    next_month_year += 1
+                end_date = pd.Timestamp(
+                    f"{next_month_year}-{next_month:02d}-01"
+                ) - pd.Timedelta(days=1)
+
+            # For the most recent quarter (i==0), cap at the reference date
+            if i == 0 and end_date > ref_date:
+                end_date = ref_date
+
+            # Add to list
+            quarters.append(
+                [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+            )
+
+        # Return quarters from oldest to newest
+        return sorted(quarters, key=lambda x: x[0])
+
     def generate_quarterly_spend_effect_comparison(
         self,
         solution_id: str,
         metrics: Optional[Dict[str, float]] = None,
     ) -> Optional[plt.Figure]:
         """
-        Generate spend effect comparison charts for each quarter of the last calendar year in a 2x2 grid.
+        Generate spend effect comparison charts for each of the last four quarters in a 2x2 grid.
 
         Args:
             solution_id: ID of the solution to visualize
@@ -988,12 +946,15 @@ class TransformationVisualizer(BaseVisualizer):
             )
             return None
 
-        # Get quarterly date ranges
-        quarters = self._get_last_calendar_year_quarters()
-        quarter_names = ["Q1", "Q2", "Q3", "Q4"]
-        year = quarters[0][0].split("-")[
-            0
-        ]  # Extract year from first quarter's start date
+        # Get last four quarters date ranges (oldest to newest)
+        quarters = self._get_last_four_quarters()
+
+        # Create quarter names based on the quarter dates
+        quarter_names = []
+        for quarter_range in quarters:
+            start_date = pd.to_datetime(quarter_range[0])
+            quarter_number = (start_date.month - 1) // 3 + 1
+            quarter_names.append(f"Q{quarter_number} {start_date.year}")
 
         # Create a figure with 2x2 grid
         fig, axes = plt.subplots(2, 2, figsize=(20, 16))
@@ -1017,14 +978,14 @@ class TransformationVisualizer(BaseVisualizer):
                     axes[i].text(
                         0.5,
                         0.5,
-                        f"No data available for {year} {quarter_name}",
+                        f"No data available for {quarter_name}",
                         ha="center",
                         va="center",
                         transform=axes[i].transAxes,
                     )
 
                 # Set simplified title for quarterly charts
-                axes[i].set_title(f"{year} {quarter_name}", pad=20, y=1.15)
+                axes[i].set_title(f"{quarter_name}", pad=20, y=1.15)
 
             except Exception as e:
                 logger.warning(
@@ -1062,8 +1023,15 @@ class TransformationVisualizer(BaseVisualizer):
             else "CPA"
         )
 
+        # Get date range for title
+        start_date = pd.to_datetime(quarters[0][0])
+        end_date = pd.to_datetime(quarters[-1][1])
+        date_range = (
+            f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        )
+
         fig.suptitle(
-            f"Quarterly Spend & Effect Share Comparison with {metric_type_display} for {year}\nSolution {solution_id}",
+            f"Quarterly Spend & Effect Share Comparison with {metric_type_display} ({date_range})\nSolution {solution_id}",
             fontsize=16,
             y=0.98,
         )
@@ -1079,7 +1047,7 @@ class TransformationVisualizer(BaseVisualizer):
         )  # Make room for overall title and metrics
 
         logger.debug(
-            f"Successfully generated quarterly spend effect comparison plots for {year}"
+            f"Successfully generated quarterly spend effect comparison plots for last four quarters"
         )
         return fig
 
