@@ -1616,6 +1616,8 @@ class ParetoVisualizer(BaseVisualizer):
         display_plots: bool = True,
         export_location: Union[str, Path] = None,
         display_criteria: str = "best_rsq_train",
+        test_rows: int = 5,  # Add parameters to control test and validation sizes
+        val_rows: int = 5,
     ) -> None:
         """
         Generates and manages plots for Pareto results based on specified criteria,
@@ -1930,9 +1932,19 @@ class ParetoVisualizer(BaseVisualizer):
                 for plot_name, plot_func in plot_funcs_solution.items():
                     full_name = f"({criteria_str})__{plot_name}_{solution_id}"
                     try:
-                        fig = plot_func(
-                            solution_id=solution_id, metrics=solution_metrics
-                        )
+                        if plot_name == "fitted_vs_actual":
+                            # Pass test_rows and val_rows when calling fitted_vs_actual
+                            fig = plot_func(
+                                solution_id=solution_id,
+                                metrics=solution_metrics,
+                                test_rows=test_rows,
+                                val_rows=val_rows,
+                            )
+                        else:
+                            # For other plot functions, call normally
+                            fig = plot_func(
+                                solution_id=solution_id, metrics=solution_metrics
+                            )
                         process_figure(
                             fig, full_name, is_solution_plot=True, sol_id=solution_id
                         )
