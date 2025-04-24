@@ -352,26 +352,29 @@ class RidgeModelEvaluator:
             )
 
         # Modified data splitting logic with fixed validation and test sizes
-        train_size = params.get("train_size", 1.0) if ts_validation else 1.0
+        train_size = params.get("train_size", 1.0)
 
         # Calculate total available training data
-        total_train_size = len(X) - val_size - test_size
+        if ts_validation:
+            total_train_size = len(X) - val_size - test_size
+        else:
+            total_train_size = len(X)
 
         metrics = {}
-        if ts_validation:
-            if train_size < 1.0:
-                # Calculate how many rows to use for training
-                used_train_size = int(np.floor(total_train_size * train_size))
-                # Start from (total_train_size - used_train_size) to use only the last portion
-                start_idx = total_train_size - used_train_size
-                X_train = X.iloc[start_idx:total_train_size]
-                y_train = y.iloc[start_idx:total_train_size]
-            else:
-                # If train_size = 1.0, use all available training data
-                X_train = X.iloc[:total_train_size]
-                y_train = y.iloc[:total_train_size]
+        if train_size < 1.0:
+            # Calculate how many rows to use for training
+            used_train_size = int(np.floor(total_train_size * train_size))
+            # Start from (total_train_size - used_train_size) to use only the last portion
+            start_idx = total_train_size - used_train_size
+            X_train = X.iloc[start_idx:total_train_size]
+            y_train = y.iloc[start_idx:total_train_size]
+        else:
+            # If train_size = 1.0, use all available training data
+            X_train = X.iloc[:total_train_size]
+            y_train = y.iloc[:total_train_size]
 
-            # Fixed validation and test sets
+        # Fixed validation and test sets (only when ts_validation is True)
+        if ts_validation:
             X_val = X.iloc[total_train_size : total_train_size + val_size]
             y_val = y.iloc[total_train_size : total_train_size + val_size]
             X_test = X.iloc[
@@ -381,7 +384,6 @@ class RidgeModelEvaluator:
                 total_train_size + val_size : total_train_size + val_size + test_size
             ]
         else:
-            X_train, y_train = X, y
             X_val = X_test = y_val = y_test = None
 
         # After splitting data (around line 352)
