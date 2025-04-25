@@ -373,9 +373,10 @@ class AllocatorVisualizer(BaseVisualizer):
             [np.inf, -np.inf], 1e9
         )
 
-        # Update metrics to match format - 4 columns with proper metric names
+        # Update metrics to match format - 5 columns with proper metric names
         metrics = [
             "abs.mean\nspend",
+            "abs.mean\nresponse",  # Added column for absolute response
             "mean\nspend%",
             "mean\nresponse%",
             f"mean\n{self.metric}",
@@ -386,6 +387,8 @@ class AllocatorVisualizer(BaseVisualizer):
         for metric_name in metrics:
             if metric_name == "abs.mean\nspend":
                 values = df_plots["mean_spend"]
+            elif metric_name == "abs.mean\nresponse":  # Handle new column
+                values = df_plots["mean_response"]
             elif metric_name == "mean\nspend%":
                 values = df_plots["spend_share"]
             elif metric_name == "mean\nresponse%":
@@ -414,7 +417,7 @@ class AllocatorVisualizer(BaseVisualizer):
         df_plot_share["values_label"] = df_plot_share.apply(
             lambda x: (
                 f"{x['values']:,.1f}"  # Add comma for thousands
-                if x["metric"] == "abs.mean\nspend"
+                if x["metric"] in ["abs.mean\nspend", "abs.mean\nresponse"]
                 else (
                     f"{x['values']*100:.1f}%"
                     if x["metric"] in ["mean\nspend%", "mean\nresponse%"]
