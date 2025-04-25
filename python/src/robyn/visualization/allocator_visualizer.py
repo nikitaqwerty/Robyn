@@ -911,21 +911,8 @@ class AllocatorVisualizer(BaseVisualizer):
                 "#17becf",
             ]
 
-            scenario_markers = [
-                "circle",
-                "square",
-                "triangle-up",
-            ]  # Marker shapes for scenarios
-
-            # Get scenarios from resp_metric
-            levs1 = self.resp_metric["type"].unique()
-            bound_mult = self.dt_optim_out["unconstr_mult"].iloc[0]
-
-            scenario_colors = ["gray", "#4682B4", "#DAA520"]  # Match existing colors
-
             # Get response curve data
             plotDT_scurve = self.eval_list["plotDT_scurve"]
-            mainPoints = self.eval_list["mainPoints"]
 
             # Add channels section header to legend (dummy trace)
             fig.add_trace(
@@ -969,21 +956,7 @@ class AllocatorVisualizer(BaseVisualizer):
                     )
                 )
 
-                # Add carryover area if data is available
-                if carryover > 0:
-                    carryover_data = channel_data[channel_data["spend"] <= carryover]
-                    if not carryover_data.empty:
-                        fig.add_trace(
-                            go.Scatter(
-                                x=carryover_data["spend"],
-                                y=carryover_data["total_response"],
-                                fill="tozeroy",
-                                fillcolor="rgba(128, 128, 128, 0.4)",
-                                line=dict(width=0),
-                                showlegend=False,
-                                hoverinfo="none",
-                            )
-                        )
+                # Removed carryover area display
 
                 # Project additional data if needed
                 projection_data = channel_data[
@@ -1040,74 +1013,6 @@ class AllocatorVisualizer(BaseVisualizer):
                         )
                     )
 
-            # Add scenarios section header to legend (dummy trace)
-            fig.add_trace(
-                go.Scatter(
-                    x=[None],
-                    y=[None],
-                    mode="markers",
-                    marker=dict(size=0, color="rgba(0,0,0,0)"),
-                    name="<b>Scenarios</b>",
-                    showlegend=True,
-                )
-            )
-
-            # Add scenario points - group together by scenario rather than by channel
-            for scenario_idx, scenario_type in enumerate(levs1[1:], 1):
-                # Only add to legend once per scenario
-                fig.add_trace(
-                    go.Scatter(
-                        x=[None],  # Empty trace for legend only
-                        y=[None],
-                        mode="markers",
-                        marker=dict(
-                            color="black",  # Use black for legend item
-                            size=10,
-                            symbol=scenario_markers[
-                                (scenario_idx - 1) % len(scenario_markers)
-                            ],
-                            line=dict(
-                                color=scenario_colors[
-                                    (scenario_idx - 1) % len(scenario_colors)
-                                ],
-                                width=2,
-                            ),
-                        ),
-                        name=scenario_type,
-                        showlegend=True,
-                    )
-                )
-
-                # Add the actual scenario points for each channel (but don't add to legend)
-                for i, channel in enumerate(self.dt_optim_out["channels"]):
-                    scenario_points = mainPoints[
-                        (mainPoints["channel"] == channel)
-                        & (mainPoints["type"] == scenario_type)
-                    ]
-
-                    if not scenario_points.empty:
-                        fig.add_trace(
-                            go.Scatter(
-                                x=scenario_points["spend_point"],
-                                y=scenario_points["response_point"],
-                                mode="markers",
-                                marker=dict(
-                                    color=colors[i % len(colors)],
-                                    size=10,
-                                    symbol=scenario_markers[
-                                        (scenario_idx - 1) % len(scenario_markers)
-                                    ],
-                                    line=dict(
-                                        color=scenario_colors[
-                                            (scenario_idx - 1) % len(scenario_colors)
-                                        ],
-                                        width=2,
-                                    ),
-                                ),
-                                showlegend=False,  # Don't show in legend
-                            )
-                        )
-
             # Add information section header to legend (dummy trace)
             fig.add_trace(
                 go.Scatter(
@@ -1132,18 +1037,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 )
             )
 
-            # Add a trace for carryover area legend
-            fig.add_trace(
-                go.Scatter(
-                    x=[None],
-                    y=[None],
-                    mode="none",
-                    fill="tozeroy",
-                    fillcolor="rgba(128, 128, 128, 0.4)",
-                    name="Historical Carryover",
-                    showlegend=True,
-                )
-            )
+            # Removed carryover area legend entry
 
             # Update layout
             fig.update_layout(
@@ -1152,7 +1046,6 @@ class AllocatorVisualizer(BaseVisualizer):
                         f"Comparative Response Curves Across All Channels<br>"
                         f"<span style='font-size:10px'>"
                         f"Solid: Historical Data | Dotted: Projections (up to 3x initial spend) | "
-                        f"Grey Area: Historical Carryover | "
                         f"Spend per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}"
                         "</span>"
                     ),
