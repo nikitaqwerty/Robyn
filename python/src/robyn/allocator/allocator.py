@@ -1348,9 +1348,9 @@ class BudgetAllocator:
                 dt_optim_out_scurve[dt_optim_out_scurve["channels"] == channel][
                     "spend"
                 ].max()
-                * 1.5
+                * 10
             )
-            simulate_spend = np.linspace(0, max_x, 100)
+            simulate_spend = np.linspace(0, max_x, 500)
 
             simulate_response = self._fx_objective(
                 x=simulate_spend,

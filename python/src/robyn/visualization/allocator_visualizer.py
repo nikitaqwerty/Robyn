@@ -759,7 +759,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 )
 
                 # Calculate projection limit
-                projection_limit = min(initial_spend * 3, max_projection_spend)
+                projection_limit = min(initial_spend * 10, max_projection_spend)
 
                 # Filter data for historical part (up to initial spend)
                 historical_data = channel_data[channel_data["spend"] <= initial_spend]
