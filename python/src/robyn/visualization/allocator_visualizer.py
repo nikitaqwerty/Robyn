@@ -529,7 +529,7 @@ class AllocatorVisualizer(BaseVisualizer):
             raise
 
     def _plot_response_curves(self):
-        """Create response curves plot."""
+        """Create response curves plot without points/arrows."""
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
@@ -545,10 +545,6 @@ class AllocatorVisualizer(BaseVisualizer):
                 {
                     "channel": row["channels"],
                     "constr_label": label,
-                    "constr_low_abs": row["constr_low_abs"],
-                    "constr_up_abs": row["constr_up_abs"],
-                    "constr_low_unb_abs": row["constr_low_unb_abs"],
-                    "constr_up_unb_abs": row["constr_up_unb_abs"],
                 }
             )
         constr_labels = pd.DataFrame(constr_labels)
@@ -558,95 +554,28 @@ class AllocatorVisualizer(BaseVisualizer):
             constr_labels, on="channel"
         )
 
-        # 3. Process mainPoints data
-        mainPoints = self.eval_list["mainPoints"].merge(constr_labels, on="channel")
-        mainPoints = mainPoints.merge(
-            self.resp_metric[["type", "type_lab"]], on="type", how="left"
-        )
-
-        # Handle type column first (matching R's mutate)
-        mainPoints["type"] = mainPoints["type"].astype(str)
-        mainPoints["type"] = pd.Categorical(
-            mainPoints["type"].fillna("Carryover"),
-            categories=["Carryover"] + list(self.resp_metric["type"].unique()),
-        )
-
-        # Handle type_lab column (matching R's mutate)
-        mainPoints["type_lab"] = mainPoints["type_lab"].astype(str)
-        mainPoints["type_lab"] = pd.Categorical(
-            mainPoints["type_lab"].fillna("Carryover"),
-            categories=["Carryover"] + list(self.resp_metric["type_lab"].unique()),
-        )
-        # Get carryover points
-        caov_points = mainPoints[mainPoints["type"] == "Carryover"][
-            ["channel", "spend_point"]
-        ].rename(columns={"spend_point": "caov_spend"})
-
-        # Merge and calculate constraint bounds
-        mainPoints = mainPoints.merge(caov_points, on="channel")
-
-        # Get the levels from resp_metric
-        levs1 = self.resp_metric[
-            "type"
-        ].unique()  # Should contain ["Initial", "Unbounded"]
-
-        # Calculate constraint bounds directly using pandas operations
-        mainPoints["constr_low_abs"] = np.where(
-            mainPoints["type"] == levs1[1],  # levs1[1] should be "Initial"
-            mainPoints["constr_low_abs"] + mainPoints["caov_spend"],
-            np.nan,
-        )
-        mainPoints["constr_up_abs"] = np.where(
-            mainPoints["type"] == levs1[1],
-            mainPoints["constr_up_abs"] + mainPoints["caov_spend"],
-            np.nan,
-        )
-        mainPoints["constr_low_unb_abs"] = np.where(
-            mainPoints["type"] == levs1[2],  # levs1[2] should be "Unbounded"
-            mainPoints["constr_low_unb_abs"] + mainPoints["caov_spend"],
-            np.nan,
-        )
-        mainPoints["constr_up_unb_abs"] = np.where(
-            mainPoints["type"] == levs1[2],
-            mainPoints["constr_up_unb_abs"] + mainPoints["caov_spend"],
-            np.nan,
-        )
-
-        # Calculate plot bounds
-        mainPoints["plot_lb"] = mainPoints["constr_low_abs"].fillna(
-            mainPoints["constr_low_unb_abs"]
-        )
-        mainPoints["plot_ub"] = mainPoints["constr_up_abs"].fillna(
-            mainPoints["constr_up_unb_abs"]
-        )
-
-        # 4. Create the plot with improved layout
+        # Calculate subplot layout
         num_channels = len(plotDT_scurve["constr_label"].unique())
         num_rows = (num_channels + 2) // 3
 
-        # Calculate the maximum allowed vertical spacing
-        # The formula is based on plotly's constraint: vertical_spacing <= 1/(rows-1)
+        # Calculate vertical spacing safely
         max_vert_spacing = 1.0 / max(1, num_rows - 1)
-
-        # Use the smaller of 0.15 or the calculated maximum to ensure we never exceed the limit
-        # Adding a small buffer (0.99) to avoid floating-point comparison issues
         vertical_spacing = min(0.15, max_vert_spacing * 0.99)
 
+        # Create figure
         fig = make_subplots(
             rows=num_rows,
             cols=3,
             subplot_titles=plotDT_scurve["constr_label"].unique(),
             horizontal_spacing=0.15,
-            vertical_spacing=vertical_spacing,  # Dynamic spacing based on number of rows
+            vertical_spacing=vertical_spacing,
         )
 
         # Add traces for each channel
         for i, channel in enumerate(plotDT_scurve["constr_label"].unique()):
             row = (i // 3) + 1
             col = (i % 3) + 1
-
             channel_data = plotDT_scurve[plotDT_scurve["constr_label"] == channel]
-            channel_points = mainPoints[mainPoints["constr_label"] == channel]
 
             # Carryover area first
             carryover_data = channel_data[
@@ -659,7 +588,7 @@ class AllocatorVisualizer(BaseVisualizer):
                         y=carryover_data["total_response"],
                         fill="tozeroy",
                         fillcolor="rgba(128, 128, 128, 0.4)",
-                        mode="none",  # Changed from line=dict(width=0)
+                        mode="none",
                         showlegend=False,
                     ),
                     row=row,
@@ -680,107 +609,6 @@ class AllocatorVisualizer(BaseVisualizer):
                 col=col,
             )
 
-            # Add points and error bars
-            if not channel_points.empty:
-                # Get the bound multiplier from the data
-                bound_mult = self.dt_optim_out["unconstr_mult"].iloc[0]
-
-                # Create color mapping dictionary with dynamic bounded multiplier
-                color_map = {
-                    "Carryover": "white",
-                    "Initial": "grey",
-                    "Bounded": "steelblue",
-                    f"Bounded x{bound_mult}": "darkgoldenrod",
-                }
-
-                # Add points for each type (only add to legend for first subplot)
-                for type_label in color_map.keys():
-                    # Use type column for Carryover, type_lab for others
-                    if type_label == "Carryover":
-                        type_points = channel_points[
-                            channel_points["type"] == "Carryover"
-                        ]
-                    else:
-                        type_points = channel_points[
-                            channel_points["type_lab"] == type_label
-                        ]
-
-                    if not type_points.empty:
-                        fig.add_trace(
-                            go.Scatter(
-                                x=type_points["spend_point"],
-                                y=type_points["response_point"],
-                                mode="markers",
-                                marker=dict(
-                                    size=10,
-                                    color=color_map[type_label],
-                                    line=dict(color="black", width=1),
-                                ),
-                                name=type_label,
-                                legendgroup=type_label,
-                                showlegend=(
-                                    i == 0
-                                ),  # Only show in legend for first subplot
-                            ),
-                            row=row,
-                            col=col,
-                        )
-
-                # Add error bars only for Bounded and Bounded x{bound_mult} points
-                bounded_points = channel_points[
-                    channel_points["type_lab"].isin(
-                        ["Bounded", f"Bounded x{bound_mult}"]
-                    )
-                ].copy()  # Add .copy() to avoid SettingWithCopyWarning
-
-                if not bounded_points.empty:
-                    # First add the dotted lines between bounds
-                    for _, point in bounded_points.iterrows():
-                        if pd.notna(point["plot_lb"]) and pd.notna(point["plot_ub"]):
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=[point["plot_lb"], point["plot_ub"]],
-                                    y=[
-                                        point["response_point"],
-                                        point["response_point"],
-                                    ],
-                                    mode="lines",
-                                    line=dict(color="black", width=1, dash="dot"),
-                                    showlegend=False,
-                                ),
-                                row=row,
-                                col=col,
-                            )
-
-                    # Then add the triangular markers at the bounds
-                    for bound, symbol in [
-                        ("plot_lb", "triangle-left"),
-                        ("plot_ub", "triangle-right"),
-                    ]:
-                        bound_points = bounded_points[pd.notna(bounded_points[bound])]
-                        if not bound_points.empty:
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=bound_points[bound],
-                                    y=bound_points["response_point"],
-                                    mode="markers",
-                                    marker=dict(
-                                        symbol=symbol,
-                                        size=8,
-                                        color="black",
-                                    ),
-                                    showlegend=False,
-                                ),
-                                row=row,
-                                col=col,
-                            )
-
-        # Adjust the height based on the number of rows (more rows need more height)
-        height_per_row = 200  # Base height per row
-        total_height = max(
-            300, min(1200, height_per_row * num_rows)
-        )  # Capped between 300 and 1200 pixels
-
         # Update layout with improved formatting
         fig.update_layout(
             title={
@@ -792,22 +620,14 @@ class AllocatorVisualizer(BaseVisualizer):
                     f"Response [{self.budget_allocator.mmm_data.mmmdata_spec.dep_var_type}]"
                     "</span>"
                 ),
-                "y": 0.99,  # Move title higher when we have many rows
+                "y": 0.99,
                 "x": 0.02,
                 "xanchor": "left",
                 "yanchor": "top",
                 "font": {"size": 12},
             },
-            showlegend=True,
-            legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=0.85,
-                xanchor="left",
-                x=1.05,
-                font=dict(size=10),
-            ),
-            height=total_height,  # Dynamic height based on number of rows
+            showlegend=False,  # Hide legend completely
+            height=max(300, min(1200, 200 * num_rows)),
             width=1000,
             template="plotly_white",
             margin=dict(t=80, b=80, l=120, r=50),
@@ -815,8 +635,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 dict(
                     text=f"Spend** per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}",
                     x=0.5,
-                    y=-0.15
-                    / (num_rows**0.5),  # Scale y position based on number of rows
+                    y=-0.15 / (num_rows**0.5),
                     xref="paper",
                     yref="paper",
                     showarrow=False,
@@ -835,6 +654,7 @@ class AllocatorVisualizer(BaseVisualizer):
             ],
         )
 
+        # Update axes
         fig.update_xaxes(
             tickfont={"size": 8},
             showgrid=True,
@@ -844,7 +664,6 @@ class AllocatorVisualizer(BaseVisualizer):
             zerolinewidth=1,
             zerolinecolor="rgba(128, 128, 128, 0.2)",
         )
-
         fig.update_yaxes(
             tickfont={"size": 8},
             showgrid=True,
@@ -855,22 +674,19 @@ class AllocatorVisualizer(BaseVisualizer):
             zerolinecolor="rgba(128, 128, 128, 0.2)",
         )
 
-        # Add bold channel names as annotations beneath each subplot
+        # Add bold channel names as annotations
         unique_labels = list(plotDT_scurve["constr_label"].unique())
         for i, label in enumerate(unique_labels, start=1):
-            # Retrieve the channel name corresponding to this subplot label
             channel = constr_labels[constr_labels["constr_label"] == label][
                 "channel"
             ].iloc[0]
-            # Determine axis keys (first subplot keys do not have a number)
             xaxis_key = "xaxis" if i == 1 else f"xaxis{i}"
             yaxis_key = "yaxis" if i == 1 else f"yaxis{i}"
-            # Get the domain for the subplot
             x_domain = fig.layout[xaxis_key].domain
             y_domain = fig.layout[yaxis_key].domain
-            # Calculate the horizontal midpoint and a position just below the subplot
             x_mid = (x_domain[0] + x_domain[1]) / 2
             y_pos = y_domain[0] - 0.08 * (y_domain[1] - y_domain[0])
+
             fig.add_annotation(
                 x=x_mid,
                 y=y_pos,
