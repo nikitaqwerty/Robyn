@@ -529,11 +529,25 @@ class AllocatorVisualizer(BaseVisualizer):
             raise
 
     def _plot_response_curves(self):
-        """Create response curves plot without points/arrows."""
+        """Create response curves plot with solid line up to initial spend and dotted extension."""
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
 
-        # 1. Create constraint labels
+        # Define a color palette for consistent styling
+        colors = [
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#7f7f7f",
+            "#bcbd22",
+            "#17becf",
+        ]
+
+        # Prepare constraint labels
         constr_labels = []
         for _, row in self.dt_optim_out.iterrows():
             label = (
@@ -541,28 +555,20 @@ class AllocatorVisualizer(BaseVisualizer):
                 f"[{row['constr_low']} - {row['constr_up']}] & "
                 f"[{round(row['constr_low_unb'], 1)} - {round(row['constr_up_unb'], 1)}]"
             )
-            constr_labels.append(
-                {
-                    "channel": row["channels"],
-                    "constr_label": label,
-                }
-            )
+            constr_labels.append({"channel": row["channels"], "constr_label": label})
         constr_labels = pd.DataFrame(constr_labels)
 
-        # 2. Merge plotDT_scurve with constraint labels
+        # Merge with constraint labels
         plotDT_scurve = self.eval_list["plotDT_scurve"].merge(
             constr_labels, on="channel"
         )
 
-        # Calculate subplot layout
+        # Compute subplot layout
         num_channels = len(plotDT_scurve["constr_label"].unique())
         num_rows = (num_channels + 2) // 3
+        vertical_spacing = min(0.15, 1.0 / max(1, num_rows - 1))
 
-        # Calculate vertical spacing safely
-        max_vert_spacing = 1.0 / max(1, num_rows - 1)
-        vertical_spacing = min(0.15, max_vert_spacing * 0.99)
-
-        # Create figure
+        # Initialize figure
         fig = make_subplots(
             rows=num_rows,
             cols=3,
@@ -571,13 +577,28 @@ class AllocatorVisualizer(BaseVisualizer):
             vertical_spacing=vertical_spacing,
         )
 
-        # Add traces for each channel
+        # Loop through each channel
         for i, channel in enumerate(plotDT_scurve["constr_label"].unique()):
             row = (i // 3) + 1
             col = (i % 3) + 1
             channel_data = plotDT_scurve[plotDT_scurve["constr_label"] == channel]
+            channel_name = channel.split("\n")[0]
 
-            # Carryover area first
+            # Retrieve initial spend
+            try:
+                initial_spend = self.dt_optim_out.loc[
+                    self.dt_optim_out["channels"] == channel_name, "initSpendUnit"
+                ].iloc[0]
+            except IndexError:
+                self.logger.warning(
+                    f"Initial spend not found for channel '{channel_name}'"
+                )
+                initial_spend = 0
+
+            # Set x-axis limit
+            right_limit = max(min(initial_spend * 5, 50000000), 3000000)
+
+            # Carryover area
             carryover_data = channel_data[
                 channel_data["spend"] <= channel_data["mean_carryover"].iloc[0]
             ]
@@ -595,37 +616,46 @@ class AllocatorVisualizer(BaseVisualizer):
                     col=col,
                 )
 
-            # Response curve second
+            # Historical segment (up to initial_spend)
+            historical_data = channel_data[channel_data["spend"] <= initial_spend]
+            color = colors[i % len(colors)]
             fig.add_trace(
                 go.Scatter(
-                    x=channel_data["spend"],
-                    y=channel_data["total_response"],
+                    x=historical_data["spend"],
+                    y=historical_data["total_response"],
                     mode="lines",
                     name=channel,
-                    line=dict(width=0.5),
+                    line=dict(color=color, width=0.5, dash="solid"),
                     showlegend=False,
                 ),
                 row=row,
                 col=col,
             )
-            # Determine channel name from constr_label
-            channel_name = channel.split("\n")[0]
 
-            # Retrieve initial spend for this channel
-            try:
-                initial_spend = self.dt_optim_out.loc[
-                    self.dt_optim_out["channels"] == channel_name, "initSpendUnit"
-                ].iloc[0]
-            except IndexError:
-                self.logger.warning(
-                    f"Initial spend not found for channel '{channel_name}'"
-                )
-                initial_spend = 0
+            # Projection segment (after initial_spend)
+            projection_limit = right_limit
+            projection_data = channel_data[
+                (channel_data["spend"] > initial_spend)
+                & (channel_data["spend"] <= projection_limit)
+            ]
 
-            right_limit = max(min(initial_spend * 5, 50000000), 3000000)
+            fig.add_trace(
+                go.Scatter(
+                    x=projection_data["spend"],
+                    y=projection_data["total_response"],
+                    mode="lines",
+                    name=f"{channel} (projected)",
+                    line=dict(color=color, width=0.5, dash="dot"),
+                    showlegend=False,
+                ),
+                row=row,
+                col=col,
+            )
+
+            # Update x-axis range
             fig.update_xaxes(range=[0, right_limit], row=row, col=col)
 
-        # Update layout with improved formatting
+        # Final layout updates
         fig.update_layout(
             title={
                 "text": (
@@ -642,7 +672,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 "yanchor": "top",
                 "font": {"size": 12},
             },
-            showlegend=False,  # Hide legend completely
+            showlegend=False,
             height=max(300, min(1200, 200 * num_rows)),
             width=1000,
             template="plotly_white",
@@ -670,7 +700,6 @@ class AllocatorVisualizer(BaseVisualizer):
             ],
         )
 
-        # Update axes
         fig.update_xaxes(
             tickfont={"size": 8},
             showgrid=True,
@@ -690,7 +719,7 @@ class AllocatorVisualizer(BaseVisualizer):
             zerolinecolor="rgba(128, 128, 128, 0.2)",
         )
 
-        # Add bold channel names as annotations
+        # Add bold channel names below each subplot
         unique_labels = list(plotDT_scurve["constr_label"].unique())
         for i, label in enumerate(unique_labels, start=1):
             channel = constr_labels[constr_labels["constr_label"] == label][
@@ -702,7 +731,6 @@ class AllocatorVisualizer(BaseVisualizer):
             y_domain = fig.layout[yaxis_key].domain
             x_mid = (x_domain[0] + x_domain[1]) / 2
             y_pos = y_domain[0] - 0.08 * (y_domain[1] - y_domain[0])
-
             fig.add_annotation(
                 x=x_mid,
                 y=y_pos,
@@ -799,54 +827,15 @@ class AllocatorVisualizer(BaseVisualizer):
                     & (channel_data["spend"] <= projection_limit)
                 ]
 
-                if (
-                    projection_data.empty
-                    and max(channel_data["spend"]) < projection_limit
-                ):
-                    # Need to extrapolate - use existing points to estimate extended curve
-                    last_points = channel_data.nlargest(5, "spend")
-                    max_response = last_points["total_response"].max()
-
-                    # Create projection data points
-                    projection_spend = np.linspace(
-                        max(channel_data["spend"]), projection_limit, 50
+                fig.add_trace(
+                    go.Scatter(
+                        x=projection_data["spend"],
+                        y=projection_data["total_response"],
+                        name=f"{channel} (projected)",
+                        line=dict(color=colors[i % len(colors)], width=2, dash="dot"),
+                        showlegend=False,
                     )
-
-                    # Simple saturation curve extrapolation (Hill-like behavior)
-                    alpha = 0.7  # Typical value from Hill parameters
-                    gamma = initial_spend  # Use initial spend as inflection point
-
-                    # Hill transformation for extrapolation
-                    projection_response = max_response * (
-                        (projection_spend**alpha)
-                        / ((projection_spend**alpha) + (gamma**alpha))
-                    )
-
-                    # Add trace for projection curve (dotted line)
-                    fig.add_trace(
-                        go.Scatter(
-                            x=projection_spend,
-                            y=projection_response,
-                            name=f"{channel} (projected)",
-                            line=dict(
-                                color=colors[i % len(colors)], width=2, dash="dot"
-                            ),
-                            showlegend=False,
-                        )
-                    )
-                else:
-                    # Use existing data for projection
-                    fig.add_trace(
-                        go.Scatter(
-                            x=projection_data["spend"],
-                            y=projection_data["total_response"],
-                            name=f"{channel} (projected)",
-                            line=dict(
-                                color=colors[i % len(colors)], width=2, dash="dot"
-                            ),
-                            showlegend=False,
-                        )
-                    )
+                )
 
             # Add information section header to legend (dummy trace)
             fig.add_trace(
