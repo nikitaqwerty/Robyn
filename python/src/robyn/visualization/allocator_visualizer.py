@@ -608,6 +608,22 @@ class AllocatorVisualizer(BaseVisualizer):
                 row=row,
                 col=col,
             )
+            # Determine channel name from constr_label
+            channel_name = channel.split("\n")[0]
+
+            # Retrieve initial spend for this channel
+            try:
+                initial_spend = self.dt_optim_out.loc[
+                    self.dt_optim_out["channels"] == channel_name, "initSpendUnit"
+                ].iloc[0]
+            except IndexError:
+                self.logger.warning(
+                    f"Initial spend not found for channel '{channel_name}'"
+                )
+                initial_spend = 0
+
+            right_limit = max(min(initial_spend * 5, 50000000), 3000000)
+            fig.update_xaxes(range=[0, right_limit], row=row, col=col)
 
         # Update layout with improved formatting
         fig.update_layout(
