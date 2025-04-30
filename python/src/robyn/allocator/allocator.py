@@ -859,15 +859,12 @@ class BudgetAllocator:
                 for i, channel in enumerate(self.channel_for_allocation)
             }
         )
-
         lower_bounds = {
             channel: self.lb[i] for i, channel in enumerate(self.channel_for_allocation)
         }
-
         upper_bounds = {
             channel: self.ub[i] for i, channel in enumerate(self.channel_for_allocation)
         }
-
         total_budget = self.total_budget_unit
 
         # Mean carryover values for response calculation
@@ -875,20 +872,19 @@ class BudgetAllocator:
 
         # Configuration
         num_cycles = 10  # Can be made configurable via params
-        fixed_increment = 2500000  # 1_000_000
+        fixed_increment = 1000000  # For marginal response calculation
 
-        # Start with lower bounds
+        # Initialize optimized spend and remaining budget
         optimized_spend = {ch: lower_bounds[ch] for ch in self.channel_for_allocation}
+        remaining_budget = total_budget - sum(optimized_spend.values())
 
         for cycle in range(num_cycles):
             self.logger.debug(f"Cycle {cycle + 1} of {num_cycles}")
 
-            # Step 1: Calculate marginal responses using fixed increment
+            # Step 1: Calculate marginal responses using current optimized_spend
             marginal_responses = {}
             for channel in self.channel_for_allocation:
                 current_spend = optimized_spend[channel]
-
-                # Current response
                 current_response = self._fx_objective(
                     x=current_spend,
                     coeff=self.coefs_eval[channel],
@@ -898,8 +894,6 @@ class BudgetAllocator:
                     theta=self.thetas[channel],
                     get_sum=False,
                 )
-
-                # Response with fixed increment
                 response_plus = self._fx_objective(
                     x=current_spend + fixed_increment,
                     coeff=self.coefs_eval[channel],
@@ -909,7 +903,6 @@ class BudgetAllocator:
                     theta=self.thetas[channel],
                     get_sum=False,
                 )
-
                 marginal_response = (response_plus - current_response) / fixed_increment
                 marginal_responses[channel] = marginal_response
 
@@ -920,32 +913,25 @@ class BudgetAllocator:
                 reverse=True,
             )
 
-            # Step 3: Reset allocations to lower bounds
-            optimized_spend = {
-                ch: lower_bounds[ch] for ch in self.channel_for_allocation
-            }
-            allocated_budget = sum(optimized_spend.values())
-            remaining_budget = total_budget - allocated_budget
+            # Step 3: Allocate a fraction of the remaining budget
+            cycles_remaining = num_cycles - cycle
+            allocation_this_cycle = remaining_budget / cycles_remaining
+            self.logger.debug(f"Allocating {allocation_this_cycle} in this cycle")
 
-            self.logger.debug(f"Remaining budget: {remaining_budget}")
-            self.logger.debug(f"Sorted channels: {sorted_channels}")
-
-            # Step 4: Reallocation based on sorted marginal responses
             for channel in sorted_channels:
-                if remaining_budget <= 1e-6:
+                if allocation_this_cycle <= 1e-6:
                     break
-
                 headroom = upper_bounds[channel] - optimized_spend[channel]
-                allocation = min(remaining_budget, headroom)
-
+                allocation = min(allocation_this_cycle, headroom)
                 if allocation > 0:
                     optimized_spend[channel] += allocation
                     remaining_budget -= allocation
+                    allocation_this_cycle -= allocation
 
             if remaining_budget > 1e-6:
-                self.logger.warning(f"Unallocated budget: {remaining_budget}")
+                self.logger.warning(f"Unallocated budget remaining: {remaining_budget}")
 
-        # Final evaluation after iterations
+        # Final evaluation and output generation (unchanged from original)
         optimized_responses = {
             ch: self._fx_objective(
                 x=optimized_spend[ch],
