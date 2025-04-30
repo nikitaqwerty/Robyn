@@ -856,7 +856,7 @@ class AllocatorVisualizer(BaseVisualizer):
                     y=[None],
                     mode="lines",
                     line=dict(color="black", width=2, dash="dot"),
-                    name="Projection (3x spend)",
+                    name="Projection",
                     showlegend=True,
                 )
             )
@@ -869,7 +869,7 @@ class AllocatorVisualizer(BaseVisualizer):
                     "text": (
                         f"Comparative Response Curves Across All Channels<br>"
                         f"<span style='font-size:10px'>"
-                        f"Solid: Historical Data | Dotted: Projections (up to 3x initial spend) | "
+                        f"Solid: Historical Data | Dotted: Projections | "
                         f"Spend per {self.budget_allocator.mmm_data.mmmdata_spec.interval_type}"
                         "</span>"
                     ),
