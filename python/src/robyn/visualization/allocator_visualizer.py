@@ -64,7 +64,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 total_budget
             )
             any_topped = optm_topped_bounded or optm_topped_unbounded
-            if optm_topped_bounded and not self.quiet:
+            if optm_topped_bounded:
                 print(
                     "NOTE: Given the upper/lower constrains, the total budget can't be fully allocated (^)"
                 )
