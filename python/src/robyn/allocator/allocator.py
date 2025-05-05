@@ -846,30 +846,15 @@ class BudgetAllocator:
             )
         )
 
-    def _optimize(self):
-        """Run budget allocation with iterative marginal response estimation."""
-        self.logger.debug(
-            "Starting iterative allocation with marginal response estimation"
-        )
+    def _run_allocation_cycle(
+        self, lower_bounds, upper_bounds, total_budget, num_cycles, x_hist_carryover
+    ):
+        """
+        Run the iterative marginal response allocation cycle.
 
-        # Initial setup
-        original_spend = pd.Series(
-            {
-                channel: self.temp_init[i]
-                for i, channel in enumerate(self.channel_for_allocation)
-            }
-        )
-        lower_bounds = {
-            channel: self.lb[i] for i, channel in enumerate(self.channel_for_allocation)
-        }
-        upper_bounds = {
-            channel: self.ub[i] for i, channel in enumerate(self.channel_for_allocation)
-        }
-        total_budget = self.total_budget_unit
-        x_hist_carryover = {k: np.mean(v) for k, v in self.hist_carryover_eval.items()}
-        num_cycles = 10  # Can be made configurable via params
-
-        # --- Bounded Allocation ---
+        Returns:
+            tuple: (optimized_spend, last_allocation)
+        """
         optimized_spend = {ch: lower_bounds[ch] for ch in self.channel_for_allocation}
         remaining_budget = total_budget - sum(optimized_spend.values())
         last_allocation = 0
@@ -925,8 +910,39 @@ class BudgetAllocator:
                     optimized_spend[channel] += allocation
                     remaining_budget -= allocation
                     allocation_remaining -= allocation
+
             if remaining_budget > 1e-6:
                 self.logger.warning(f"Unallocated budget remaining: {remaining_budget}")
+
+        return optimized_spend, last_allocation
+
+    def _optimize(self):
+        """Run budget allocation with iterative marginal response estimation."""
+        self.logger.debug(
+            "Starting iterative allocation with marginal response estimation"
+        )
+
+        # Initial setup
+        original_spend = pd.Series(
+            {
+                channel: self.temp_init[i]
+                for i, channel in enumerate(self.channel_for_allocation)
+            }
+        )
+        lower_bounds = {
+            channel: self.lb[i] for i, channel in enumerate(self.channel_for_allocation)
+        }
+        upper_bounds = {
+            channel: self.ub[i] for i, channel in enumerate(self.channel_for_allocation)
+        }
+        total_budget = self.total_budget_unit
+        x_hist_carryover = {k: np.mean(v) for k, v in self.hist_carryover_eval.items()}
+        num_cycles = 10  # Can be made configurable via params
+
+        # --- Bounded Allocation ---
+        optimized_spend, last_allocation = self._run_allocation_cycle(
+            lower_bounds, upper_bounds, total_budget, num_cycles, x_hist_carryover
+        )
 
         # Evaluate bounded allocation
         optimized_responses = {
@@ -942,74 +958,19 @@ class BudgetAllocator:
             for ch in self.channel_for_allocation
         }
 
-        # --- Unbounded Allocation (with same cycle logic) ---
+        # --- Unbounded Allocation ---
         extended_upper_bounds = {
             channel: upper * self.params.channel_constr_multiplier
             for channel, upper in upper_bounds.items()
         }
-        optimized_spend_unbounded = {
-            ch: lower_bounds[ch] for ch in self.channel_for_allocation
-        }
-        remaining_budget_unb = total_budget - sum(optimized_spend_unbounded.values())
-        last_allocation_unb = 0
 
-        for cycle in range(num_cycles):
-            self.logger.debug(f"Unbounded Cycle {cycle + 1} of {num_cycles}")
-            cycles_remaining = num_cycles - cycle
-            allocation_this_cycle = remaining_budget_unb / cycles_remaining
-            last_allocation_unb = allocation_this_cycle
-
-            # Calculate marginal responses
-            marginal_responses_unb = {}
-            for channel in self.channel_for_allocation:
-                current_spend = optimized_spend_unbounded[channel]
-                current_response = self._fx_objective(
-                    x=current_spend,
-                    coeff=self.coefs_eval[channel],
-                    alpha=self.alphas_eval[f"{channel}_alphas"],
-                    inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                    x_hist_carryover=x_hist_carryover[channel],
-                    theta=self.thetas[channel],
-                    get_sum=False,
-                )
-                response_plus = self._fx_objective(
-                    x=current_spend + allocation_this_cycle,
-                    coeff=self.coefs_eval[channel],
-                    alpha=self.alphas_eval[f"{channel}_alphas"],
-                    inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                    x_hist_carryover=x_hist_carryover[channel],
-                    theta=self.thetas[channel],
-                    get_sum=False,
-                )
-                marginal_response = (
-                    response_plus - current_response
-                ) / allocation_this_cycle
-                marginal_responses_unb[channel] = marginal_response
-
-            # Sort by marginal response
-            sorted_channels_unb = sorted(
-                self.channel_for_allocation,
-                key=lambda ch: marginal_responses_unb[ch],
-                reverse=True,
-            )
-
-            # Allocate budget
-            allocation_remaining_unb = allocation_this_cycle
-            for channel in sorted_channels_unb:
-                if allocation_remaining_unb <= 1e-6:
-                    break
-                headroom = (
-                    extended_upper_bounds[channel] - optimized_spend_unbounded[channel]
-                )
-                allocation = min(allocation_remaining_unb, headroom)
-                if allocation > 0:
-                    optimized_spend_unbounded[channel] += allocation
-                    remaining_budget_unb -= allocation
-                    allocation_remaining_unb -= allocation
-            if remaining_budget_unb > 1e-6:
-                self.logger.warning(
-                    f"Unallocated budget remaining in unbounded: {remaining_budget_unb}"
-                )
+        optimized_spend_unbounded, last_allocation_unb = self._run_allocation_cycle(
+            lower_bounds,
+            extended_upper_bounds,
+            total_budget,
+            num_cycles,
+            x_hist_carryover,
+        )
 
         # Evaluate unbounded allocation
         optimized_responses_unbounded = {
@@ -1034,6 +995,7 @@ class BudgetAllocator:
         optm_response_marg_unit_unbound = self.init_response_marg_unit.copy()
 
         for channel in self.channel_for_allocation:
+            # Bounded allocation results
             optm_spend_unit[channel] = optimized_spend[channel]
             optm_response_unit[channel] = optimized_responses[channel]
             optm_response_marg_unit[channel] = (
@@ -1049,6 +1011,7 @@ class BudgetAllocator:
                 - optimized_responses[channel]
             ) / last_allocation
 
+            # Unbounded allocation results
             optm_spend_unit_unbound[channel] = optimized_spend_unbounded[channel]
             optm_response_unit_unbound[channel] = optimized_responses_unbounded[channel]
             optm_response_marg_unit_unbound[channel] = (
@@ -1070,12 +1033,15 @@ class BudgetAllocator:
             np.concatenate([self.zero_coef_channel, self.zero_constraint_channel]),
         )
         for channel in self.media_spend_sorted[channels_to_drop]:
-            optm_spend_unit[channel] = 0
-            optm_response_unit[channel] = 0
-            optm_response_marg_unit[channel] = 0
-            optm_spend_unit_unbound[channel] = 0
-            optm_response_unit_unbound[channel] = 0
-            optm_response_marg_unit_unbound[channel] = 0
+            for result_dict in [
+                optm_spend_unit,
+                optm_response_unit,
+                optm_response_marg_unit,
+                optm_spend_unit_unbound,
+                optm_response_unit_unbound,
+                optm_response_marg_unit_unbound,
+            ]:
+                result_dict[channel] = 0
 
         # Build results dictionary
         optimized_results = {
@@ -1104,6 +1070,7 @@ class BudgetAllocator:
         total_init_response = float(sum(original_spend.values))
         total_opt_response = float(sum(optimized_responses.values()))
         response_lift = float((total_opt_response / total_init_response - 1) * 100)
+
         self.logger.debug("Iterative allocation completed")
         self.logger.debug(f"Total initial response: {total_init_response}")
         self.logger.debug(f"Total optimized response: {total_opt_response}")
@@ -1125,6 +1092,7 @@ class BudgetAllocator:
                 ],
             }
         )
+
         print("Budget allocation results:")
         print(comparison)
 
