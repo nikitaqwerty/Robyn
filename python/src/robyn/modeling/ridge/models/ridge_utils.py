@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler  # Assuming this is allowed
 # intercept parameter from original API seems unused/superceded by fit_intercept, so omitted from Python version's direct use.
 
 
-def create_ridge_model_rpy2(
+def create_ridge_model_python(
     lambda_value,
     n_samples,
     fit_intercept=True,
@@ -342,7 +342,7 @@ def create_ridge_model_rpy2(
     return PythonRidgeWrapper()
 
 
-def _create_ridge_model_rpy2(
+def create_ridge_model_rpy2(
     lambda_value,
     n_samples,
     fit_intercept=True,
