@@ -378,27 +378,31 @@ class ResponseVisualizer(BaseVisualizer):
 
             # Generate dynamic color map based on actual channel names
             def get_channel_colors(channels: List[str]) -> Dict[str, str]:
-                # Base colors that are visually distinct
                 base_colors = [
                     "#FF9D1C",  # Orange
-                    "#69B3E7",  # Light blue
+                    "#69B3E7",  # Light Blue
                     "#7B4EA3",  # Purple
                     "#E41A1C",  # Red
                     "#4DAF4A",  # Green
                     "#377EB8",  # Blue
-                    "#984EA3",  # Purple
-                    "#FF7F00",  # Orange
+                    "#984EA3",  # Violet
+                    "#FF7F00",  # Dark Orange
                     "#FFFF33",  # Yellow
                     "#A65628",  # Brown
                     "#F781BF",  # Pink
                     "#999999",  # Gray
+                    "#1CE9F4",  # Teal
+                    "#E3256B",  # Magenta
+                    "#006400",  # Dark Green
+                    "#FF7F50",  # Coral
+                    "#4B0082",  # Indigo
+                    "#FFD700",  # Gold
+                    "#4682B4",  # Steel Blue
+                    "#FA8072",  # Salmon
                 ]
-
-                # Create a color mapping based on actual channel names
                 color_mapping = {}
                 for i, channel in enumerate(channels):
                     color_mapping[channel] = base_colors[i % len(base_colors)]
-
                 return color_mapping
 
             try:

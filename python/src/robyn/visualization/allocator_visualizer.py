@@ -760,7 +760,6 @@ class AllocatorVisualizer(BaseVisualizer):
             fig = go.Figure()
 
             # Set up colors for channels and scenarios
-            # Using Plotly's default color sequence
             colors = [
                 "#1f77b4",
                 "#ff7f0e",
@@ -772,6 +771,16 @@ class AllocatorVisualizer(BaseVisualizer):
                 "#7f7f7f",
                 "#bcbd22",
                 "#17becf",
+                "#aec7e8",
+                "#ffbb78",
+                "#98df8a",
+                "#ff9896",
+                "#c5b0d5",
+                "#c49c94",
+                "#f7b6d2",
+                "#dbdb8d",
+                "#9edae5",
+                "#ad494a",
             ]
 
             # Get response curve data
