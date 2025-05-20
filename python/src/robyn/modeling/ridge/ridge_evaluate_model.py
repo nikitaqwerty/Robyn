@@ -211,7 +211,7 @@ class RidgeModelEvaluator:
                     )
                     # Add MAE to debug log if available
                     if "mae_val" in result:
-                        self.logger.debug(f"MAE: {result['mae']:.6f}")
+                        self.logger.debug(f"MAE: {result['mae_val']:.6f}")
 
         end_time = time.time()
         self.logger.info(f" Finished in {(end_time - start_time) / 60:.2f} mins")
@@ -236,9 +236,11 @@ class RidgeModelEvaluator:
             }
         )
 
-        # Add the MAE metric to the hyper_param DataFrame
+        # Add the MAE and MAPE metrics to the hyper_param DataFrame
         if "mae_val" in all_results[0]:
             result_hyp_param["mae_val"] = [float(r["mae_val"]) for r in all_results]
+        if "mape_val" in all_results[0]:
+            result_hyp_param["mape_val"] = [float(r["mape_val"]) for r in all_results]
 
         decomp_spend_dist = pd.concat(
             [r["decomp_spend_dist"] for r in all_results], ignore_index=True
@@ -266,7 +268,7 @@ class RidgeModelEvaluator:
         # Log MAE in debug output but don't try to add it to the Trial constructor
         if "mae_val" in best_result:
             self.logger.debug(
-                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}, MAE={best_result['mae']:.6f}"
+                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}, MAE={best_result['mae_val']:.6f}"
             )
         else:
             self.logger.debug(
@@ -1150,9 +1152,11 @@ class RidgeModelEvaluator:
             }
         )
 
-        # Add MAE to decomp_spend_dist if available
+        # Add MAE and MAPE to decomp_spend_dist if available
         if "mae_val" in metrics:
             decomp_spend_dist["mae_val"] = metrics["mae_val"]
+        if "mape_val" in metrics:
+            decomp_spend_dist["mape_val"] = metrics["mape_val"]
 
         # Ensure correct column order
         required_cols = [
@@ -1181,9 +1185,11 @@ class RidgeModelEvaluator:
             "Elapsed",
             "pos",
         ]
-        # Add MAE to required columns if available
+        # Add MAE and MAPE to required columns if available
         if "mae_val" in decomp_spend_dist.columns:
             required_cols.insert(required_cols.index("decomp_rssd"), "mae_val")
+        if "mape_val" in decomp_spend_dist.columns:
+            required_cols.insert(required_cols.index("decomp_rssd"), "mape_val")
 
         decomp_spend_dist = decomp_spend_dist[required_cols]
 
@@ -1222,9 +1228,11 @@ class RidgeModelEvaluator:
             "Elapsed": float(metrics.get("Elapsed", 0)),
         }
 
-        # Add MAE to x_decomp_agg if available
+        # Add MAE and MAPE to x_decomp_agg if available
         if "mae_val" in metrics:
             x_decomp_agg_data["mae_val"] = float(metrics["mae_val"])
+        if "mape_val" in metrics:
+            x_decomp_agg_data["mape_val"] = float(metrics["mape_val"])
 
         x_decomp_agg = pd.DataFrame(x_decomp_agg_data)
 
@@ -1262,9 +1270,11 @@ class RidgeModelEvaluator:
             "Elapsed",
         ]
 
-        # Add MAE to required columns if available
+        # Add MAE and MAPE to required columns if available
         if "mae_val" in x_decomp_agg.columns:
             required_cols.insert(required_cols.index("decomp.rssd"), "mae_val")
+        if "mape_val" in x_decomp_agg.columns:
+            required_cols.insert(required_cols.index("decomp.rssd"), "mape_val")
 
         x_decomp_agg = x_decomp_agg[required_cols]
 

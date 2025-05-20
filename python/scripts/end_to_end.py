@@ -328,8 +328,8 @@ def main():
     print(
         "Best MAE coeffs:",
         output_models.all_x_decomp_agg.loc[
-            output_models.all_x_decomp_agg.mae
-            == output_models.all_x_decomp_agg.mae.min()
+            output_models.all_x_decomp_agg.mae_val
+            == output_models.all_x_decomp_agg.mae_val.min()
         ],
     )
 
@@ -354,7 +354,7 @@ def main():
     print("Unfiltered Pareto results:")
     print(
         unfiltered_pareto_result.result_hyp_param.sort_values(
-            "mae", ascending=True
+            "mae_val", ascending=True
         ).head()
     )
 
@@ -382,14 +382,16 @@ def main():
     )
 
     print("Filtered Pareto results:")
-    print(pareto_result.result_hyp_param.sort_values("mae", ascending=True).head())
+    print(pareto_result.result_hyp_param.sort_values("mae_val", ascending=True).head())
 
     # Analyze best model
     best_mae_row = pareto_result.result_hyp_param.sort_values(
-        "mae", ascending=True
+        "mae_val", ascending=True
     ).iloc[0]
     best_mae_model = best_mae_row.sol_id
-    print(f"Best model from pareto results: {best_mae_model},  MAE: {best_mae_row.mae}")
+    print(
+        f"Best model from pareto results: {best_mae_model},  MAE: {best_mae_row.mae_val}"
+    )
 
     plot_data = pareto_result.plot_data_collect[best_mae_model]
     ts_data = plot_data["plot5data"]["xDecompVecPlotMelted"]
@@ -421,7 +423,7 @@ def main():
         metrics = {}
 
         # Mean Absolute Error
-        metrics["mae"] = mean_absolute_error(last_n["actual"], last_n["predicted"])
+        metrics["mae_val"] = mean_absolute_error(last_n["actual"], last_n["predicted"])
 
         # Root Mean Square Error
         metrics["rmse"] = np.sqrt(
@@ -525,7 +527,7 @@ def main():
         MODEL_EXECUTION_PARAMS["val_size"] + MODEL_EXECUTION_PARAMS["test_size"]
     )
     print(f"Original Data - Metrics for the last {total_val_test_size} data points:")
-    print(f"MAE: {metrics['mae']:.4f}")
+    print(f"MAE: {metrics['mae_val']:.4f}")
     print(f"R2: {metrics['r2']:.4f}")
     print(last_n_rows)
 
@@ -562,7 +564,9 @@ def main():
 
     # Select model for budget allocation
     select_model = (
-        pareto_result.result_hyp_param.sort_values("mae", ascending=True).iloc[0].sol_id
+        pareto_result.result_hyp_param.sort_values("mae_val", ascending=True)
+        .iloc[0]
+        .sol_id
     )
     print(f"Selected model for budget allocation: {select_model}")
 
