@@ -234,6 +234,10 @@ class RidgeModelBuilder:
         all_result_hyp_param = pd.concat(
             [trial.result_hyp_param for trial in trials], ignore_index=True
         )
+        # Ensure mae_val and mape_val columns exist
+        for col in ["mae_val", "mape_val"]:
+            if col not in all_result_hyp_param.columns:
+                all_result_hyp_param[col] = np.nan
         all_result_hyp_param = self.ridge_data_builder.safe_astype(
             all_result_hyp_param,
             {
@@ -257,12 +261,18 @@ class RidgeModelBuilder:
                 "nrmse_test": "float64",
                 "ElapsedAccum": "float64",
                 "Elapsed": "float64",
+                "mae_val": "float64",
+                "mape_val": "float64",
             },
         )
 
         all_x_decomp_agg = pd.concat(
             [trial.x_decomp_agg for trial in trials], ignore_index=True
         )
+        # Ensure mae_val and mape_val columns exist
+        for col in ["mae_val", "mape_val"]:
+            if col not in all_x_decomp_agg.columns:
+                all_x_decomp_agg[col] = np.nan
         all_x_decomp_agg = self.ridge_data_builder.safe_astype(
             all_x_decomp_agg,
             {
@@ -279,6 +289,8 @@ class RidgeModelBuilder:
                 "sol_id": "str",
                 "pos": "bool",
                 "mape": "int64",
+                "mae_val": "float64",
+                "mape_val": "float64",
             },
         )
 

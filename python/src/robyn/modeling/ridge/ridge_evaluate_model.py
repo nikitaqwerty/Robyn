@@ -841,6 +841,7 @@ class RidgeModelEvaluator:
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
                 metrics["mae_val"] = 0.0
+                metrics["mape_val"] = 0.0
                 metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing
