@@ -767,21 +767,21 @@ class RidgeModelEvaluator:
                     start_test = end_test - fold_size
                     if start_test < 1:
                         continue
-                    
+
                     # Calculate training window based on cv_train_size
                     if cv_train_size is not None:
                         start_train = max(0, start_test - cv_train_size)
                     else:
                         start_train = 0
-                    
+
                     X_tr = X.iloc[start_train:start_test]
                     y_tr = y.iloc[start_train:start_test]
                     X_te = X.iloc[start_test:end_test]
                     y_te = y.iloc[start_test:end_test]
-                    
+
                     if X_tr.empty or X_te.empty:
                         continue
-                    
+
                     x_tr_np = X_tr.to_numpy()
                     y_tr_np = y_tr.to_numpy()
                     model_cv = create_ridge_model_rpy2(
@@ -843,7 +843,7 @@ class RidgeModelEvaluator:
                     metrics["rsq_val"] = 0.0
                     metrics["nrmse_val"] = 0.0
 
-                metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
+                metrics["nrmse"] = metrics["nrmse_val"]  # for loss calculation
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
             else:

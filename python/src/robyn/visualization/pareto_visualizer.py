@@ -117,7 +117,8 @@ class ParetoVisualizer(BaseVisualizer):
                 "nrmse_val",
                 "nrmse_test",
                 "decomp.rssd",
-                "mae",
+                "mae_val",
+                "mape_val",
             ]
         }
 
@@ -126,7 +127,8 @@ class ParetoVisualizer(BaseVisualizer):
             f"Metrics for Solution {solution_id}",
             f"Train R²: {metrics_to_display['rsq_train']:.3f}, Val R²: {metrics_to_display['rsq_val']:.3f}, Test R²: {metrics_to_display['rsq_test']:.3f}",
             f"NRMSE: {metrics_to_display['nrmse']:.3f} (Train: {metrics_to_display['nrmse_train']:.3f}, Val: {metrics_to_display['nrmse_val']:.3f}, Test: {metrics_to_display['nrmse_test']:.3f})",
-            f"MAE: {metrics_to_display['mae']:.3f}",
+            f"MAE: {metrics_to_display['mae_val']:.3f}",
+            f"MAPE: {metrics_to_display['mape_val']:.3f}",
             f"Decomp RSSD: {metrics_to_display['decomp.rssd']:.3f}",
         ]
 
@@ -1698,10 +1700,9 @@ class ParetoVisualizer(BaseVisualizer):
 
         criteria_metrics = {
             "best_rsq_train": ("rsq_train", False),
-            "best_rsq_test": ("rsq_test", False),
+            "best_rsq_val": ("rsq_val", False),
             "best_nrmse_train": ("nrmse_train", True),
-            "best_nrmse_test": ("nrmse_test", True),
-            "best_mae_test": ("mae", True),
+            "best_mae_val": ("mae_val", True),
             "best_error_score": ("error_score", True),
         }
 
