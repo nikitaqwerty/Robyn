@@ -59,6 +59,7 @@ class RidgeModelEvaluator:
         test_size: int = 5,
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
+        cv_n_folds: Optional[int] = None,
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -158,6 +159,7 @@ class RidgeModelEvaluator:
                         test_size=test_size,
                         fixed_coefficients=fixed_coefficients,
                         fixed_intercept=fixed_intercept,
+                        cv_n_folds=cv_n_folds,
                     )
 
                 self.logger.debug(
@@ -314,8 +316,13 @@ class RidgeModelEvaluator:
         test_size: int = 5,  # New parameter for fixed test size
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
+        cv_n_folds: Optional[int] = None,  # New parameter for number of CV folds
     ) -> Dict[str, Any]:
-        """Evaluate model with parameter set"""
+        """Evaluate model with parameter set
+        Args:
+            ...
+            cv_n_folds: If None, do not use CV. If int, use as number of folds for time-series CV.
+        """
         # Get transformed data
         transformed_data = self.ridge_data_builder.run_transformations(
             params,
@@ -743,83 +750,91 @@ class RidgeModelEvaluator:
                 )
             )
         else:
-            # No ts_validation: perform 3-fold time-series CV with concatenated predictions
-            fold_size = test_size
-            n_samples = len(X)
-            y_true_folds = []
-            y_pred_folds = []
-            df_int_last = None
-            for k in range(3):
-                end_test = n_samples - k * fold_size
-                start_test = end_test - fold_size
-                if start_test < 1:
-                    continue
-                X_tr = X.iloc[:start_test]
-                y_tr = y.iloc[:start_test]
-                X_te = X.iloc[start_test:end_test]
-                y_te = y.iloc[start_test:end_test]
-                if X_tr.empty or X_te.empty:
-                    continue
-                x_tr_np = X_tr.to_numpy()
-                y_tr_np = y_tr.to_numpy()
-                model_cv = create_ridge_model_rpy2(
-                    lambda_value=params.get("lambda", 1.0),
-                    n_samples=len(x_tr_np),
-                    fit_intercept=True,
-                    standardize=True,
-                    intercept_sign=intercept_sign,
-                    intercept=intercept,
-                    lower_limits=lower_limits,
-                    upper_limits=upper_limits,
-                    penalty_factor=penalty_factor,
-                    fixed_coefficients=formatted_fixed_coefficients,
-                    fixed_intercept=fixed_intercept,
-                )
-                model_cv.fit(x_tr_np, y_tr_np)
-                y_pred = model_cv.predict(X_te.to_numpy())
-                y_true_folds.append(y_te.to_numpy())
-                y_pred_folds.append(y_pred)
-                df_int_last = model_cv.df_int
-
-            if y_true_folds and y_pred_folds:
-                y_true_concat = np.concatenate(y_true_folds)
-                y_pred_concat = np.concatenate(y_pred_folds)
-                metrics["rsq_val"] = self.ridge_metrics_calculator.calculate_r2_score(
-                    y_true_concat,
-                    y_pred_concat,
-                    p=X.shape[1],
-                    df_int=df_int_last,
-                    n_train=len(y_train),
-                )
-                metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
-                    y_true_concat, y_pred_concat
-                )
-                # Calculate MAE and MAPE for concatenated predictions
-                metrics["mae"] = np.mean(np.abs(y_true_concat - y_pred_concat))
-                # Avoid division by zero in MAPE calculation
-                nonzero_mask = y_true_concat != 0
-                if np.any(nonzero_mask):
-                    metrics["mape_cv"] = (
-                        np.mean(
-                            np.abs(
-                                (
-                                    y_true_concat[nonzero_mask]
-                                    - y_pred_concat[nonzero_mask]
-                                )
-                                / y_true_concat[nonzero_mask]
-                            )
-                        )
-                        * 100
+            # Only use CV if cv_n_folds is provided and > 1
+            if cv_n_folds is not None and cv_n_folds > 1:
+                fold_size = test_size
+                n_samples = len(X)
+                y_true_folds = []
+                y_pred_folds = []
+                df_int_last = None
+                for k in range(cv_n_folds):
+                    end_test = n_samples - k * fold_size
+                    start_test = end_test - fold_size
+                    if start_test < 1:
+                        continue
+                    X_tr = X.iloc[:start_test]
+                    y_tr = y.iloc[:start_test]
+                    X_te = X.iloc[start_test:end_test]
+                    y_te = y.iloc[start_test:end_test]
+                    if X_tr.empty or X_te.empty:
+                        continue
+                    x_tr_np = X_tr.to_numpy()
+                    y_tr_np = y_tr.to_numpy()
+                    model_cv = create_ridge_model_rpy2(
+                        lambda_value=params.get("lambda", 1.0),
+                        n_samples=len(x_tr_np),
+                        fit_intercept=True,
+                        standardize=True,
+                        intercept_sign=intercept_sign,
+                        intercept=intercept,
+                        lower_limits=lower_limits,
+                        upper_limits=upper_limits,
+                        penalty_factor=penalty_factor,
+                        fixed_coefficients=formatted_fixed_coefficients,
+                        fixed_intercept=fixed_intercept,
                     )
-                else:
-                    metrics["mape_cv"] = np.nan
-            else:
-                metrics["rsq_val"] = 0.0
-                metrics["nrmse_val"] = 0.0
+                    model_cv.fit(x_tr_np, y_tr_np)
+                    y_pred = model_cv.predict(X_te.to_numpy())
+                    y_true_folds.append(y_te.to_numpy())
+                    y_pred_folds.append(y_pred)
+                    df_int_last = model_cv.df_int
 
-            metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
-            metrics["rsq_test"] = 0.0
-            metrics["nrmse_test"] = 0.0
+                if y_true_folds and y_pred_folds:
+                    y_true_concat = np.concatenate(y_true_folds)
+                    y_pred_concat = np.concatenate(y_pred_folds)
+                    metrics["rsq_val"] = self.ridge_metrics_calculator.calculate_r2_score(
+                        y_true_concat,
+                        y_pred_concat,
+                        p=X.shape[1],
+                        df_int=df_int_last,
+                        n_train=len(y_train),
+                    )
+                    metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
+                        y_true_concat, y_pred_concat
+                    )
+                    # Calculate MAE and MAPE for concatenated predictions
+                    metrics["mae"] = np.mean(np.abs(y_true_concat - y_pred_concat))
+                    # Avoid division by zero in MAPE calculation
+                    nonzero_mask = y_true_concat != 0
+                    if np.any(nonzero_mask):
+                        metrics["mape_cv"] = (
+                            np.mean(
+                                np.abs(
+                                    (
+                                        y_true_concat[nonzero_mask]
+                                        - y_pred_concat[nonzero_mask]
+                                    )
+                                    / y_true_concat[nonzero_mask]
+                                )
+                            )
+                            * 100
+                        )
+                    else:
+                        metrics["mape_cv"] = np.nan
+                else:
+                    metrics["rsq_val"] = 0.0
+                    metrics["nrmse_val"] = 0.0
+
+                metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
+                metrics["rsq_test"] = 0.0
+                metrics["nrmse_test"] = 0.0
+            else:
+                # No CV: just use train metrics for val/test
+                metrics["rsq_val"] = metrics.get("rsq_train", 0.0)
+                metrics["nrmse_val"] = metrics.get("nrmse_train", 0.0)
+                metrics["rsq_test"] = 0.0
+                metrics["nrmse_test"] = 0.0
+                metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing
         metrics.setdefault("rsq_val", metrics.get("rsq_train", 0.0))
