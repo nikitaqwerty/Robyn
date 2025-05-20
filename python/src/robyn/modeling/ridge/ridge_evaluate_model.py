@@ -210,7 +210,7 @@ class RidgeModelEvaluator:
                         f"Iteration {iter_ng+1} results - NRMSE: {result['nrmse']:.6f}, RSSD: {result.get('decomp_rssd', 0):.6f}, Loss: {result['loss']:.6f}"
                     )
                     # Add MAE to debug log if available
-                    if "mae" in result:
+                    if "mae_val" in result:
                         self.logger.debug(f"MAE: {result['mae']:.6f}")
 
         end_time = time.time()
@@ -237,8 +237,8 @@ class RidgeModelEvaluator:
         )
 
         # Add the MAE metric to the hyper_param DataFrame
-        if "mae" in all_results[0]:
-            result_hyp_param["mae"] = [float(r["mae"]) for r in all_results]
+        if "mae_val" in all_results[0]:
+            result_hyp_param["mae_val"] = [float(r["mae_val"]) for r in all_results]
 
         decomp_spend_dist = pd.concat(
             [r["decomp_spend_dist"] for r in all_results], ignore_index=True
@@ -264,7 +264,7 @@ class RidgeModelEvaluator:
             )
 
         # Log MAE in debug output but don't try to add it to the Trial constructor
-        if "mae" in best_result:
+        if "mae_val" in best_result:
             self.logger.debug(
                 f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}, MAE={best_result['mae']:.6f}"
             )
@@ -715,7 +715,7 @@ class RidgeModelEvaluator:
             metrics["nrmse"] = metrics["nrmse_val_test"]
 
             # Calculate MAE and MAPE for concatenated predictions
-            metrics["mae"] = np.mean(np.abs(y_val_test - y_val_test_pred))
+            metrics["mae_val"] = np.mean(np.abs(y_val_test - y_val_test_pred))
             # Avoid division by zero in MAPE calculation
             nonzero_mask = y_val_test != 0
             if np.any(nonzero_mask):
@@ -807,11 +807,11 @@ class RidgeModelEvaluator:
                         )
                     )
                     # Calculate MAE and MAPE for concatenated predictions
-                    metrics["mae"] = np.mean(np.abs(y_true_concat - y_pred_concat))
+                    metrics["mae_val"] = np.mean(np.abs(y_true_concat - y_pred_concat))
                     # Avoid division by zero in MAPE calculation
                     nonzero_mask = y_true_concat != 0
                     if np.any(nonzero_mask):
-                        metrics["mape_cv"] = (
+                        metrics["mape_val"] = (
                             np.mean(
                                 np.abs(
                                     (
@@ -824,7 +824,7 @@ class RidgeModelEvaluator:
                             * 100
                         )
                     else:
-                        metrics["mape_cv"] = np.nan
+                        metrics["mape_val"] = np.nan
                 else:
                     metrics["rsq_val"] = 0.0
                     metrics["nrmse_val"] = 0.0
@@ -838,7 +838,7 @@ class RidgeModelEvaluator:
                 metrics["nrmse_val"] = metrics.get("nrmse_train", 0.0)
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
-                metrics["mae"] = 0.0
+                metrics["mae_val"] = 0.0
                 metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing
@@ -857,7 +857,7 @@ class RidgeModelEvaluator:
                         "nrmse_train": metrics["nrmse_train"],
                         "nrmse_val": metrics["nrmse_val"],
                         "nrmse_test": metrics["nrmse_test"],
-                        "mae": metrics["mae"],  # Add MAE to logged metrics
+                        "mae_val": metrics["mae_val"],  # Add MAE to logged metrics
                         "coefs": list(model.get_full_coefficients()),
                         "df_int": model.df_int,
                     },
@@ -1151,8 +1151,8 @@ class RidgeModelEvaluator:
         )
 
         # Add MAE to decomp_spend_dist if available
-        if "mae" in metrics:
-            decomp_spend_dist["mae"] = metrics["mae"]
+        if "mae_val" in metrics:
+            decomp_spend_dist["mae_val"] = metrics["mae_val"]
 
         # Ensure correct column order
         required_cols = [
@@ -1182,8 +1182,8 @@ class RidgeModelEvaluator:
             "pos",
         ]
         # Add MAE to required columns if available
-        if "mae" in decomp_spend_dist.columns:
-            required_cols.insert(required_cols.index("decomp_rssd"), "mae")
+        if "mae_val" in decomp_spend_dist.columns:
+            required_cols.insert(required_cols.index("decomp_rssd"), "mae_val")
 
         decomp_spend_dist = decomp_spend_dist[required_cols]
 
@@ -1223,8 +1223,8 @@ class RidgeModelEvaluator:
         }
 
         # Add MAE to x_decomp_agg if available
-        if "mae" in metrics:
-            x_decomp_agg_data["mae"] = float(metrics["mae"])
+        if "mae_val" in metrics:
+            x_decomp_agg_data["mae_val"] = float(metrics["mae_val"])
 
         x_decomp_agg = pd.DataFrame(x_decomp_agg_data)
 
@@ -1263,8 +1263,8 @@ class RidgeModelEvaluator:
         ]
 
         # Add MAE to required columns if available
-        if "mae" in x_decomp_agg.columns:
-            required_cols.insert(required_cols.index("decomp.rssd"), "mae")
+        if "mae_val" in x_decomp_agg.columns:
+            required_cols.insert(required_cols.index("decomp.rssd"), "mae_val")
 
         x_decomp_agg = x_decomp_agg[required_cols]
 
