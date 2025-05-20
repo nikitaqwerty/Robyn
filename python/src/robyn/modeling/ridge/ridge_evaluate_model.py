@@ -60,6 +60,7 @@ class RidgeModelEvaluator:
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
         cv_n_folds: Optional[int] = None,
+        cv_train_size: Optional[int] = None,
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -160,6 +161,7 @@ class RidgeModelEvaluator:
                         fixed_coefficients=fixed_coefficients,
                         fixed_intercept=fixed_intercept,
                         cv_n_folds=cv_n_folds,
+                        cv_train_size=cv_train_size,
                     )
 
                 self.logger.debug(

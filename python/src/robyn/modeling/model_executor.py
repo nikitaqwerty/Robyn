@@ -54,6 +54,7 @@ class ModelExecutor(BaseModelExecutor):
         fixed_intercept: Optional[float] = None,  # New parameter for fixed intercept
         reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
+        cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -117,6 +118,7 @@ class ModelExecutor(BaseModelExecutor):
                     fixed_intercept=fixed_intercept,
                     reinit_nevergrad_between_trials=reinit_nevergrad_between_trials,
                     cv_n_folds=cv_n_folds,
+                    cv_train_size=cv_train_size,
                 )
                 self.logger.info("Model building completed successfully")
 
