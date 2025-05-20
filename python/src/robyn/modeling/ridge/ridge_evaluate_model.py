@@ -792,15 +792,19 @@ class RidgeModelEvaluator:
                 if y_true_folds and y_pred_folds:
                     y_true_concat = np.concatenate(y_true_folds)
                     y_pred_concat = np.concatenate(y_pred_folds)
-                    metrics["rsq_val"] = self.ridge_metrics_calculator.calculate_r2_score(
-                        y_true_concat,
-                        y_pred_concat,
-                        p=X.shape[1],
-                        df_int=df_int_last,
-                        n_train=len(y_train),
+                    metrics["rsq_val"] = (
+                        self.ridge_metrics_calculator.calculate_r2_score(
+                            y_true_concat,
+                            y_pred_concat,
+                            p=X.shape[1],
+                            df_int=df_int_last,
+                            n_train=len(y_train),
+                        )
                     )
-                    metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
-                        y_true_concat, y_pred_concat
+                    metrics["nrmse_val"] = (
+                        self.ridge_metrics_calculator.calculate_nrmse(
+                            y_true_concat, y_pred_concat
+                        )
                     )
                     # Calculate MAE and MAPE for concatenated predictions
                     metrics["mae"] = np.mean(np.abs(y_true_concat - y_pred_concat))
@@ -834,6 +838,7 @@ class RidgeModelEvaluator:
                 metrics["nrmse_val"] = metrics.get("nrmse_train", 0.0)
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
+                metrics["mae"] = 0.0
                 metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing

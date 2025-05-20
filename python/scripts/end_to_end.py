@@ -318,6 +318,7 @@ def main():
         test_size=MODEL_EXECUTION_PARAMS["test_size"],
         # fixed_coefficients=MODEL_EXECUTION_PARAMS["fixed_coefficients"],
         # fixed_intercept=MODEL_EXECUTION_PARAMS["fixed_intercept"],
+        cv_n_folds=3,
     )
 
     # Display model output summaries

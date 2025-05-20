@@ -163,6 +163,7 @@ class RidgeModelBuilder:
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
         reinit_nevergrad_between_trials: bool = False,
+        cv_n_folds: Optional[int] = None,
     ) -> ModelOutputs:
         start_time = time.time()
 
@@ -222,6 +223,7 @@ class RidgeModelBuilder:
                 test_size=test_size,
                 fixed_coefficients=fixed_coefficients,
                 fixed_intercept=fixed_intercept,
+                cv_n_folds=cv_n_folds,
             )
             trials.append(trial_result)
         # Calculate convergence
