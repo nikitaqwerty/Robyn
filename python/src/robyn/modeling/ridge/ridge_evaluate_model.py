@@ -707,8 +707,22 @@ class RidgeModelEvaluator:
             # Use the combined NRMSE instead of just validation NRMSE
             metrics["nrmse"] = metrics["nrmse_val_test"]
 
-            # Calculate MAE on the combined validation and test sets
+            # Calculate MAE and MAPE for concatenated predictions
             metrics["mae"] = np.mean(np.abs(y_val_test - y_val_test_pred))
+            # Avoid division by zero in MAPE calculation
+            nonzero_mask = y_val_test != 0
+            if np.any(nonzero_mask):
+                metrics["mape"] = (
+                    np.mean(
+                        np.abs(
+                            (y_val_test[nonzero_mask] - y_val_test_pred[nonzero_mask])
+                            / y_val_test[nonzero_mask]
+                        )
+                    )
+                    * 100
+                )
+            else:
+                metrics["mape"] = np.nan
 
             # Log the combined NRMSE calculation
             self.logger.debug(
@@ -780,10 +794,30 @@ class RidgeModelEvaluator:
                 metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
                     y_true_concat, y_pred_concat
                 )
+                # Calculate MAE and MAPE for concatenated predictions
+                metrics["mae"] = np.mean(np.abs(y_true_concat - y_pred_concat))
+                # Avoid division by zero in MAPE calculation
+                nonzero_mask = y_true_concat != 0
+                if np.any(nonzero_mask):
+                    metrics["mape_cv"] = (
+                        np.mean(
+                            np.abs(
+                                (
+                                    y_true_concat[nonzero_mask]
+                                    - y_pred_concat[nonzero_mask]
+                                )
+                                / y_true_concat[nonzero_mask]
+                            )
+                        )
+                        * 100
+                    )
+                else:
+                    metrics["mape_cv"] = np.nan
             else:
                 metrics["rsq_val"] = 0.0
                 metrics["nrmse_val"] = 0.0
 
+            metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
             metrics["rsq_test"] = 0.0
             metrics["nrmse_test"] = 0.0
 
