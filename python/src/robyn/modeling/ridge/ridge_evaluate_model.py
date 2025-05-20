@@ -319,6 +319,7 @@ class RidgeModelEvaluator:
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
         cv_n_folds: Optional[int] = None,  # New parameter for number of CV folds
+        cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set
         Args:
@@ -764,12 +765,21 @@ class RidgeModelEvaluator:
                     start_test = end_test - fold_size
                     if start_test < 1:
                         continue
-                    X_tr = X.iloc[:start_test]
-                    y_tr = y.iloc[:start_test]
+                    
+                    # Calculate training window based on cv_train_size
+                    if cv_train_size is not None:
+                        start_train = max(0, start_test - cv_train_size)
+                    else:
+                        start_train = 0
+                    
+                    X_tr = X.iloc[start_train:start_test]
+                    y_tr = y.iloc[start_train:start_test]
                     X_te = X.iloc[start_test:end_test]
                     y_te = y.iloc[start_test:end_test]
+                    
                     if X_tr.empty or X_te.empty:
                         continue
+                    
                     x_tr_np = X_tr.to_numpy()
                     y_tr_np = y_tr.to_numpy()
                     model_cv = create_ridge_model_rpy2(
