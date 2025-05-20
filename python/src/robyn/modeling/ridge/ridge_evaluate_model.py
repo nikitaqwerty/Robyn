@@ -729,11 +729,67 @@ class RidgeModelEvaluator:
                 )
             )
         else:
-            y_pred = y_train_pred  # If no validation, just use training predictions
-            metrics["rsq_val"] = metrics["rsq_test"] = 0.0
-            metrics["nrmse_val"] = metrics["nrmse_test"] = 0.0
-            metrics["nrmse"] = metrics["nrmse_train"]
-            metrics["mae"] = 0.0  # Default value when no validation/test set
+            # No ts_validation: perform 3-fold time-series CV with concatenated predictions
+            fold_size = test_size
+            n_samples = len(X)
+            y_true_folds = []
+            y_pred_folds = []
+            df_int_last = None
+            for k in range(3):
+                end_test = n_samples - k * fold_size
+                start_test = end_test - fold_size
+                if start_test < 1:
+                    continue
+                X_tr = X.iloc[:start_test]
+                y_tr = y.iloc[:start_test]
+                X_te = X.iloc[start_test:end_test]
+                y_te = y.iloc[start_test:end_test]
+                if X_tr.empty or X_te.empty:
+                    continue
+                x_tr_np = X_tr.to_numpy()
+                y_tr_np = y_tr.to_numpy()
+                model_cv = create_ridge_model_rpy2(
+                    lambda_value=params.get("lambda", 1.0),
+                    n_samples=len(x_tr_np),
+                    fit_intercept=True,
+                    standardize=True,
+                    intercept_sign=intercept_sign,
+                    intercept=intercept,
+                    lower_limits=lower_limits,
+                    upper_limits=upper_limits,
+                    penalty_factor=penalty_factor,
+                    fixed_coefficients=formatted_fixed_coefficients,
+                    fixed_intercept=fixed_intercept,
+                )
+                model_cv.fit(x_tr_np, y_tr_np)
+                y_pred = model_cv.predict(X_te.to_numpy())
+                y_true_folds.append(y_te.to_numpy())
+                y_pred_folds.append(y_pred)
+                df_int_last = model_cv.df_int
+
+            if y_true_folds and y_pred_folds:
+                y_true_concat = np.concatenate(y_true_folds)
+                y_pred_concat = np.concatenate(y_pred_folds)
+                metrics["rsq_val"] = self.ridge_metrics_calculator.calculate_r2_score(
+                    y_true_concat,
+                    y_pred_concat,
+                    p=X.shape[1],
+                    df_int=df_int_last,
+                    n_train=len(y_train),
+                )
+                metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
+                    y_true_concat, y_pred_concat
+                )
+            else:
+                metrics["rsq_val"] = 0.0
+                metrics["nrmse_val"] = 0.0
+
+            metrics["rsq_test"] = 0.0
+            metrics["nrmse_test"] = 0.0
+
+        # Ensure defaults if missing
+        metrics.setdefault("rsq_val", metrics.get("rsq_train", 0.0))
+        metrics.setdefault("nrmse_val", metrics.get("nrmse_train", 0.0))
 
         # Log ridge regression results
         self.logger.debug(
