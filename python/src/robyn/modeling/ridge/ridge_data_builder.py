@@ -313,8 +313,12 @@ class RidgeDataBuilder:
                 hyper_collect["hyper_list_all"][param_key] = [param_value, param_value]
 
         # Add lambda parameter (like R)
-        hyper_collect["hyper_bound_list_updated"]["lambda"] = [0, 1]  # Lambda_hp bounds
-        hyper_collect["hyper_list_all"]["lambda"] = [0, 1]
+        hyper_collect["hyper_bound_list_updated"][
+            "lambda"
+        ] = prepared_hyperparameters.lambda_  # [0, 1]  # Lambda_hp bounds
+        hyper_collect["hyper_list_all"][
+            "lambda"
+        ] = prepared_hyperparameters.lambda_  # [0, 1]
 
         # Handle train_size after media parameters
         if ts_validation:

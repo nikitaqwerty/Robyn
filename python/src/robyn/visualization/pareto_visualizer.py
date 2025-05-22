@@ -1735,7 +1735,8 @@ class ParetoVisualizer(BaseVisualizer):
             "nrmse_val",
             "nrmse_test",
             "decomp.rssd",
-            "mae",
+            "mae_val",
+            "mape_val",
         ]
         metrics_data_all_indexed = None  # Use a version indexed by sol_id
         if all_results_df is not None and not all_results_df.empty:

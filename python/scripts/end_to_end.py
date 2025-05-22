@@ -96,7 +96,7 @@ CHANNEL_HYPERPARAMETERS = {
 
 # General model hyperparameters
 ADSTOCK_TYPE = AdstockType.GEOMETRIC
-LAMBDA_RANGE = [0, 0.5]
+LAMBDA_RANGE = [0, 0.1]
 TRAIN_SIZE_RANGE = [0.8, 1.0]
 
 # Model execution parameters

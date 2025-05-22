@@ -843,7 +843,7 @@ class RidgeModelEvaluator:
                     metrics["rsq_val"] = 0.0
                     metrics["nrmse_val"] = 0.0
 
-                metrics["nrmse"] = metrics["nrmse_val"]  # for loss calculation
+                metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
             else:
