@@ -235,6 +235,7 @@ class RidgeModelEvaluator:
                 "rsq_train": "float64",
                 "rsq_val": "float64",
                 "rsq_test": "float64",
+                "train_size": "float64",
             }
         )
 
@@ -757,8 +758,11 @@ class RidgeModelEvaluator:
         else:
             # Only use CV if cv_n_folds is provided and > 1
             if cv_n_folds is not None and cv_n_folds > 1:
+                # Use the appropriately sized training data that respects train_size
+                X_cv = X_train
+                y_cv = y_train
                 fold_size = test_size
-                n_samples = len(X)
+                n_samples = len(X_cv)  # Use the train data length, not full dataset
                 y_true_folds = []
                 y_pred_folds = []
                 df_int_last = None
@@ -774,10 +778,10 @@ class RidgeModelEvaluator:
                     else:
                         start_train = 0
 
-                    X_tr = X.iloc[start_train:start_test]
-                    y_tr = y.iloc[start_train:start_test]
-                    X_te = X.iloc[start_test:end_test]
-                    y_te = y.iloc[start_test:end_test]
+                    X_tr = X_cv.iloc[start_train:start_test]
+                    y_tr = y_cv.iloc[start_train:start_test]
+                    X_te = X_cv.iloc[start_test:end_test]
+                    y_te = y_cv.iloc[start_test:end_test]
 
                     if X_tr.empty or X_te.empty:
                         continue
@@ -810,7 +814,7 @@ class RidgeModelEvaluator:
                         self.ridge_metrics_calculator.calculate_r2_score(
                             y_true_concat,
                             y_pred_concat,
-                            p=X.shape[1],
+                            p=X_cv.shape[1],  # Use X_cv shape
                             df_int=df_int_last,
                             n_train=len(y_train),
                         )

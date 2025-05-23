@@ -265,6 +265,7 @@ class RidgeModelBuilder:
                 "Elapsed": "float64",
                 "mae_val": "float64",
                 "mape_val": "float64",
+                "train_size": "float64",
             },
         )
 
