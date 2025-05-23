@@ -201,6 +201,7 @@ class RidgeModelEvaluator:
                         "lambda_min_ratio": float(result["lambda_min_ratio"]),
                         "iterNG": int(iter_ng + 1),
                         "iterPar": 1,
+                        "train_size": float(result["train_size"]),  # Add train_size to params
                     }
                 )
 
