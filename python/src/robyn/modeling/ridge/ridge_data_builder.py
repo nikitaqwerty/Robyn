@@ -321,23 +321,22 @@ class RidgeDataBuilder:
         ] = prepared_hyperparameters.lambda_  # [0, 1]
 
         # Handle train_size after media parameters
-        if ts_validation:
-            if (
-                isinstance(prepared_hyperparameters.train_size, list)
-                and len(prepared_hyperparameters.train_size) == 2
-            ):
-                hyper_collect["hyper_bound_list_updated"][
-                    "train_size"
-                ] = prepared_hyperparameters.train_size
-                hyper_collect["hyper_list_all"][
-                    "train_size"
-                ] = prepared_hyperparameters.train_size
-            else:
-                train_size = [0.5, 0.8]
-                hyper_collect["hyper_bound_list_updated"]["train_size"] = train_size
-                hyper_collect["hyper_list_all"]["train_size"] = train_size
+        # train_size optimization should work regardless of ts_validation setting
+        if (
+            isinstance(prepared_hyperparameters.train_size, list)
+            and len(prepared_hyperparameters.train_size) == 2
+        ):
+            # User provided bounds - use them for optimization
+            hyper_collect["hyper_bound_list_updated"][
+                "train_size"
+            ] = prepared_hyperparameters.train_size
+            hyper_collect["hyper_list_all"][
+                "train_size"
+            ] = prepared_hyperparameters.train_size
         else:
-            hyper_collect["hyper_list_all"]["train_size"] = [1.0, 1.0]
+            train_size = [0.8, 1]
+            hyper_collect["hyper_bound_list_updated"]["train_size"] = train_size
+            hyper_collect["hyper_list_all"]["train_size"] = train_size
 
         # Add debug logging with pretty printing
         logger.debug(
