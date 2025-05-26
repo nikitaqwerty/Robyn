@@ -165,6 +165,7 @@ class RidgeModelBuilder:
         reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
+        hp_opt_score_target: str = "nrmse_train",
     ) -> ModelOutputs:
         start_time = time.time()
 
@@ -226,6 +227,7 @@ class RidgeModelBuilder:
                 fixed_intercept=fixed_intercept,
                 cv_n_folds=cv_n_folds,
                 cv_train_size=cv_train_size,
+                hp_opt_score_target=hp_opt_score_target,
             )
             trials.append(trial_result)
         # Calculate convergence

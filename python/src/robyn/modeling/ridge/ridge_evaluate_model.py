@@ -61,6 +61,7 @@ class RidgeModelEvaluator:
         fixed_intercept: Optional[float] = None,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
+        hp_opt_score_target: str = "nrmse_train",
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -162,6 +163,7 @@ class RidgeModelEvaluator:
                         fixed_intercept=fixed_intercept,
                         cv_n_folds=cv_n_folds,
                         cv_train_size=cv_train_size,
+                        hp_opt_score_target=hp_opt_score_target,
                     )
 
                 self.logger.debug(
@@ -324,6 +326,7 @@ class RidgeModelEvaluator:
         fixed_intercept: Optional[float] = None,
         cv_n_folds: Optional[int] = None,  # New parameter for number of CV folds
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
+        hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set
         Args:
@@ -718,8 +721,13 @@ class RidgeModelEvaluator:
                 y_val_test, y_val_test_pred
             )
 
-            # Use the combined NRMSE instead of just validation NRMSE
-            metrics["nrmse"] = metrics["nrmse_val_test"]
+            # Set the NRMSE metric for loss calculation based on hp_opt_score_target parameter
+            if hp_opt_score_target in metrics:
+                metrics["nrmse"] = metrics[hp_opt_score_target]
+            else:
+                # Fallback to nrmse_val_test (the default behavior for this case) if requested metric is not available
+                self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_val_test'")
+                metrics["nrmse"] = metrics["nrmse_val_test"]
 
             # Calculate MAE and MAPE for concatenated predictions
             metrics["mae_val"] = np.mean(np.abs(y_val_test - y_val_test_pred))
@@ -848,7 +856,13 @@ class RidgeModelEvaluator:
                     metrics["rsq_val"] = 0.0
                     metrics["nrmse_val"] = 0.0
 
-                metrics["nrmse"] = metrics["nrmse_train"]  # for loss calculation
+                # Set the NRMSE metric for loss calculation based on hp_opt_score_target parameter
+                if hp_opt_score_target in metrics:
+                    metrics["nrmse"] = metrics[hp_opt_score_target]
+                else:
+                    # Fallback to nrmse_train if the requested metric is not available
+                    self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'")
+                    metrics["nrmse"] = metrics["nrmse_train"]
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
             else:
@@ -859,7 +873,13 @@ class RidgeModelEvaluator:
                 metrics["nrmse_test"] = 0.0
                 metrics["mae_val"] = 0.0
                 metrics["mape_val"] = 0.0
-                metrics["nrmse"] = metrics["nrmse_train"]
+                # Set the NRMSE metric for loss calculation based on hp_opt_score_target parameter
+                if hp_opt_score_target in metrics:
+                    metrics["nrmse"] = metrics[hp_opt_score_target]
+                else:
+                    # Fallback to nrmse_train if the requested metric is not available
+                    self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'")
+                    metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing
         metrics.setdefault("rsq_val", metrics.get("rsq_train", 0.0))

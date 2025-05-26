@@ -55,6 +55,7 @@ class ModelExecutor(BaseModelExecutor):
         reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
+        hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -64,6 +65,9 @@ class ModelExecutor(BaseModelExecutor):
                                 Features not included will be fitted normally.
             fixed_intercept: Fixed value for the intercept. If provided, the intercept
                             will not be fitted but set to this value.
+            hp_opt_score_target: Which NRMSE metric to use for hyperparameter optimization loss calculation.
+                               Valid options: 'nrmse_train', 'nrmse_val', 'nrmse_test', 'nrmse_val_test'.
+                               Default is 'nrmse_train'.
         """
         self.logger.info("Starting model execution with model_name=%s", model_name)
         self.logger.debug(
@@ -80,6 +84,12 @@ class ModelExecutor(BaseModelExecutor):
         try:
             self._validate_input()
             self.logger.debug("Input validation successful")
+            
+            # Validate hp_opt_score_target parameter
+            valid_targets = ["nrmse_train", "nrmse_val", "nrmse_test", "nrmse_val_test"]
+            if hp_opt_score_target not in valid_targets:
+                raise ValueError(f"hp_opt_score_target must be one of {valid_targets}, got {hp_opt_score_target}")
+            self.logger.debug("hp_opt_score_target validation successful: %s", hp_opt_score_target)
 
             cores = CommonUtils.get_cores_available(cores)
             self.logger.debug("Using %d cores for processing", cores)
@@ -119,6 +129,7 @@ class ModelExecutor(BaseModelExecutor):
                     reinit_nevergrad_between_trials=reinit_nevergrad_between_trials,
                     cv_n_folds=cv_n_folds,
                     cv_train_size=cv_train_size,
+                    hp_opt_score_target=hp_opt_score_target,
                 )
                 self.logger.info("Model building completed successfully")
 
