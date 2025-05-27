@@ -1620,6 +1620,7 @@ class ParetoVisualizer(BaseVisualizer):
         display_criteria: str = "best_rsq_train",
         test_rows: int = 5,  # Add parameters to control test and validation sizes
         val_rows: int = 5,
+        sol_id: Optional[str] = None,  # Add explicit solution ID parameter
     ) -> None:
         """
         Generates and manages plots for Pareto results based on specified criteria,
@@ -1638,6 +1639,8 @@ class ParetoVisualizer(BaseVisualizer):
                               'best_nrmse_train', 'best_nrmse_test', or keys of
                               non-solution specific plots like 'prophet_decomp'.
                               Defaults to 'best_rsq_train'.
+            sol_id: Optional explicit solution ID to generate plots for. If provided,
+                    this overrides the automatic best solution selection based on criteria.
         """
         figures_to_display: Dict[str, plt.Figure] = {}
         figures_to_export: Dict[str, plt.Figure] = {}
@@ -1690,7 +1693,7 @@ class ParetoVisualizer(BaseVisualizer):
                 logger.warning(f"Error getting best solution for {metric}: {e}")
                 return None
 
-        # --- Identify Target Solutions (remains the same) ---
+        # --- Identify Target Solutions ---
         cleaned_results_df = self.pareto_result.result_hyp_param
         all_results_df = (
             self.unfiltered_pareto_result.result_hyp_param
@@ -1698,32 +1701,64 @@ class ParetoVisualizer(BaseVisualizer):
             else None
         )
 
-        criteria_metrics = {
-            "best_rsq_train": ("rsq_train", False),
-            "best_rsq_val": ("rsq_val", False),
-            "best_nrmse_train": ("nrmse_train", True),
-            "best_mae_val": ("mae_val", True),
-            "best_error_score": ("error_score", True),
-        }
+        if sol_id is not None:
+            # Use explicitly provided solution ID
+            logger.info(f"Using explicitly provided solution ID: {sol_id}")
+            
+            # Validate that the solution ID exists in the data
+            if sol_id not in self.pareto_result.plot_data_collect:
+                # Check if solution exists in unfiltered results
+                sol_id_found = False
+                if self.unfiltered_pareto_result:
+                    unfiltered_df = self.unfiltered_pareto_result.result_hyp_param
+                    # Check both possible column names for solution ID
+                    for col_name in ["sol_id", "solID"]:
+                        if col_name in unfiltered_df.columns and sol_id in unfiltered_df[col_name].values:
+                            sol_id_found = True
+                            break
+                
+                if sol_id_found:
+                    logger.warning(
+                        f"Solution ID {sol_id} found in unfiltered results but not in plot_data_collect. "
+                        "This solution's plot data was not generated."
+                    )
+                else:
+                    logger.error(f"Invalid solution ID: {sol_id}. Solution not found in any available data.")
+                    return
+            
+            # Use the explicit solution ID for all criteria
+            target_solutions = {"explicit_sol_id": sol_id}
+            solution_ids_to_plot = [sol_id]
+            display_sol_id = sol_id
+            logger.info(f"Using explicit solution ID: {sol_id}")
+        else:
+            # Use automatic best solution selection based on criteria
+            criteria_metrics = {
+                "best_rsq_train": ("rsq_train", False),
+                "best_rsq_val": ("rsq_val", False),
+                "best_nrmse_train": ("nrmse_train", True),
+                "best_mae_val": ("mae_val", True),
+                "best_error_score": ("error_score", True),
+            }
 
-        for key, (metric, ascending) in criteria_metrics.items():
-            best_id = get_best_sol_id(cleaned_results_df, metric, ascending)
-            target_solutions[key] = best_id
-            logger.info(f"Identified solution for {key}: {target_solutions[key]}")
+            for key, (metric, ascending) in criteria_metrics.items():
+                best_id = get_best_sol_id(cleaned_results_df, metric, ascending)
+                target_solutions[key] = best_id
+                logger.info(f"Identified solution for {key}: {target_solutions[key]}")
 
-        solution_ids_to_plot = sorted(
-            list(set(filter(None, target_solutions.values())))
-        )
+            solution_ids_to_plot = sorted(
+                list(set(filter(None, target_solutions.values())))
+            )
 
-        # Determine the specific solution ID to display plots for
-        display_sol_id = (
-            target_solutions.get(display_criteria)
-            if display_criteria in target_solutions
-            else None
-        )
-        logger.info(
-            f"Display criteria '{display_criteria}' targets solution ID: {display_sol_id}"
-        )
+            # Determine the specific solution ID to display plots for
+            display_sol_id = (
+                target_solutions.get(display_criteria)
+                if display_criteria in target_solutions
+                else None
+            )
+            logger.info(
+                f"Display criteria '{display_criteria}' targets solution ID: {display_sol_id}"
+            )
 
         # --- Fetch Metrics Data (remains similar, ensure robust indexing) ---
         metric_cols = [
@@ -1795,14 +1830,8 @@ class ParetoVisualizer(BaseVisualizer):
             should_display = False
             if display_plots:
                 if is_solution_plot:
-                    # Display if it's the target solution and the criteria matches the plot's origin criteria
-                    criteria_keys_for_sol = [
-                        k for k, v in target_solutions.items() if v == sol_id
-                    ]
-                    if (
-                        sol_id == display_sol_id
-                        and display_criteria in criteria_keys_for_sol
-                    ):
+                    # Display if it's the target solution
+                    if sol_id == display_sol_id:
                         should_display = True
                 elif (
                     plot_key == display_criteria
@@ -1926,10 +1955,15 @@ class ParetoVisualizer(BaseVisualizer):
                     )
 
                 # Find the criteria keys associated with this solution_id
-                criteria_keys = sorted(
-                    [k for k, v in target_solutions.items() if v == solution_id]
-                )  # Sort for consistent naming
-                criteria_str = "_".join(criteria_keys)
+                if "explicit_sol_id" in target_solutions:
+                    # Use explicit naming when solution ID was explicitly provided
+                    criteria_str = "explicit_sol_id"
+                else:
+                    # Use automatic criteria naming
+                    criteria_keys = sorted(
+                        [k for k, v in target_solutions.items() if v == solution_id]
+                    )  # Sort for consistent naming
+                    criteria_str = "_".join(criteria_keys)
 
                 for plot_name, plot_func in plot_funcs_solution.items():
                     full_name = f"({criteria_str})__{plot_name}_{solution_id}"
