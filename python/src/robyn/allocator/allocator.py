@@ -669,7 +669,7 @@ class BudgetAllocator:
                 try:
                     roi_values = {}
                     for i, channel in enumerate(self.channel_for_allocation):
-                        spend = self.temp_init[i]
+                        spend = self.temp_init.iloc[i]
                         response = (
                             self.init_response_unit[channel]
                             if channel in self.init_response_unit.index
@@ -684,9 +684,9 @@ class BudgetAllocator:
                     high_roi_idx = 0
 
                 # Allocate remaining budget to the target channel (up to its upper bound)
-                available_headroom = self.ub[high_roi_idx] - self.x0[high_roi_idx]
+                available_headroom = self.ub.iloc[high_roi_idx] - self.x0.iloc[high_roi_idx]
                 allocation = min(remaining_budget, available_headroom)
-                self.x0[high_roi_idx] += allocation
+                self.x0.iloc[high_roi_idx] += allocation
 
                 # If we still have remaining budget after maxing out the target channel,
                 # distribute it proportionally among the other channels
@@ -711,10 +711,10 @@ class BudgetAllocator:
             remaining_budget_ext = total_budget - np.sum(self.x0_ext)
             if remaining_budget_ext > 0:
                 available_headroom_ext = (
-                    self.ub_ext[high_roi_idx] - self.x0_ext[high_roi_idx]
+                    self.ub_ext.iloc[high_roi_idx] - self.x0_ext.iloc[high_roi_idx]
                 )
                 allocation_ext = min(remaining_budget_ext, available_headroom_ext)
-                self.x0_ext[high_roi_idx] += allocation_ext
+                self.x0_ext.iloc[high_roi_idx] += allocation_ext
 
                 if remaining_budget_ext - allocation_ext > 0.01:
                     secondary_budget_ext = remaining_budget_ext - allocation_ext
@@ -925,15 +925,15 @@ class BudgetAllocator:
         # Initial setup
         original_spend = pd.Series(
             {
-                channel: self.temp_init[i]
+                channel: self.temp_init.iloc[i]
                 for i, channel in enumerate(self.channel_for_allocation)
             }
         )
         lower_bounds = {
-            channel: self.lb[i] for i, channel in enumerate(self.channel_for_allocation)
+            channel: self.lb.iloc[i] for i, channel in enumerate(self.channel_for_allocation)
         }
         upper_bounds = {
-            channel: self.ub[i] for i, channel in enumerate(self.channel_for_allocation)
+            channel: self.ub.iloc[i] for i, channel in enumerate(self.channel_for_allocation)
         }
         total_budget = self.total_budget_unit
         x_hist_carryover = {k: np.mean(v) for k, v in self.hist_carryover_eval.items()}
