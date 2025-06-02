@@ -354,6 +354,7 @@ def create_ridge_model_rpy2(
     penalty_factor=None,
     fixed_coefficients=None,  # Parameter for fixed coefficients
     fixed_intercept=None,  # New parameter for fixed intercept
+    weights=None,  # New parameter for observation weights
 ):
     """Create a Ridge regression model using rpy2 to access glmnet.
 
@@ -369,6 +370,8 @@ def create_ridge_model_rpy2(
         penalty_factor: Penalty factors for each coefficient
         fixed_coefficients: List of fixed coefficient values (None for coefficients to be fitted)
         fixed_intercept: Fixed value for intercept (None to fit the intercept)
+        weights: Observation weights. Can be total counts if responses are proportion matrices. 
+                Default is 1 for each observation
 
     Returns:
         A Ridge regression model using rpy2 to access glmnet.
@@ -413,6 +416,7 @@ def create_ridge_model_rpy2(
             self.df_int = 1  # Initialize to 1
             self.fixed_coefficients = fixed_coefficients  # Store fixed coefficients
             self.fixed_intercept = fixed_intercept  # Store fixed intercept
+            self.weights = weights  # Store observation weights
 
         def fit(self, X, y):
             X = np.asarray(X)
@@ -503,6 +507,14 @@ def create_ridge_model_rpy2(
                                 else ro.r("NULL")
                             ),
                         )
+                        ro.r.assign(
+                            "weights_r",
+                            (
+                                self.weights
+                                if self.weights is not None
+                                else ro.r("NULL")
+                            ),
+                        )
 
                         # Set intercept parameter based on fixed_intercept
                         use_intercept = (
@@ -522,6 +534,7 @@ def create_ridge_model_rpy2(
                             upper.limits = upper_limits_r,
                             type.measure = "mse",
                             penalty.factor = penalty_factor_r,
+                            weights = weights_r,
                             intercept = %s
                         )
                         coef_values <<- as.numeric(coef(r_model, s = lambda_value))
@@ -550,6 +563,7 @@ def create_ridge_model_rpy2(
                                 upper.limits = upper_limits_r,
                                 type.measure = "mse",
                                 penalty.factor = penalty_factor_r,
+                                weights = weights_r,
                                 intercept = FALSE
                             )
                             coef_values <<- as.numeric(coef(r_model, s = lambda_value))
@@ -596,6 +610,14 @@ def create_ridge_model_rpy2(
                         ro.r.assign("X_r", X)
                         ro.r.assign("y_r", y_adjusted)
                         ro.r.assign("lambda_value", self.lambda_value)
+                        ro.r.assign(
+                            "weights_r",
+                            (
+                                self.weights
+                                if self.weights is not None
+                                else ro.r("NULL")
+                            ),
+                        )
                         r_code = """
                         # Create a dummy model
                         r_model <<- glmnet(
@@ -604,6 +626,7 @@ def create_ridge_model_rpy2(
                             family = "gaussian",
                             alpha = 0,
                             lambda = lambda_value,
+                            weights = weights_r,
                             intercept = FALSE
                         )
                         """
@@ -629,6 +652,10 @@ def create_ridge_model_rpy2(
                         "penalty_factor_r",
                         penalty_factor if penalty_factor is not None else ro.r("NULL"),
                     )
+                    ro.r.assign(
+                        "weights_r",
+                        self.weights if self.weights is not None else ro.r("NULL"),
+                    )
 
                     # Set intercept parameter based on fixed_intercept
                     use_intercept = self.fixed_intercept is None and self.fit_intercept
@@ -646,6 +673,7 @@ def create_ridge_model_rpy2(
                         upper.limits = upper_limits_r,
                         type.measure = "mse",
                         penalty.factor = penalty_factor_r,
+                        weights = weights_r,
                         intercept = %s
                     )
                     coef_values <<- as.numeric(coef(r_model, s = lambda_value))
@@ -674,6 +702,7 @@ def create_ridge_model_rpy2(
                             upper.limits = upper_limits_r,
                             type.measure = "mse",
                             penalty.factor = penalty_factor_r,
+                            weights = weights_r,
                             intercept = FALSE
                         )
                         coef_values <<- as.numeric(coef(r_model, s = lambda_value))
