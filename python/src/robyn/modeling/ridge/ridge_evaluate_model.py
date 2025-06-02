@@ -62,6 +62,7 @@ class RidgeModelEvaluator:
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
+        weights: Optional[np.ndarray] = None,
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -164,6 +165,7 @@ class RidgeModelEvaluator:
                         cv_n_folds=cv_n_folds,
                         cv_train_size=cv_train_size,
                         hp_opt_score_target=hp_opt_score_target,
+                        weights=weights,
                     )
 
                 self.logger.debug(
@@ -327,6 +329,7 @@ class RidgeModelEvaluator:
         cv_n_folds: Optional[int] = None,  # New parameter for number of CV folds
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
+        weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set
         Args:
@@ -385,10 +388,14 @@ class RidgeModelEvaluator:
             start_idx = total_train_size - used_train_size
             X_train = X.iloc[start_idx:total_train_size]
             y_train = y.iloc[start_idx:total_train_size]
+            # Subset weights if provided
+            weights_train = weights[start_idx:total_train_size] if weights is not None else None
         else:
             # If train_size = 1.0, use all available training data
             X_train = X.iloc[:total_train_size]
             y_train = y.iloc[:total_train_size]
+            # Subset weights if provided
+            weights_train = weights[:total_train_size] if weights is not None else None
 
         # Fixed validation and test sets (only when ts_validation is True)
         if ts_validation:
@@ -606,6 +613,7 @@ class RidgeModelEvaluator:
             penalty_factor=penalty_factor,
             fixed_coefficients=formatted_fixed_coefficients,  # Pass the formatted fixed coefficients
             fixed_intercept=fixed_intercept,  # Pass the fixed intercept
+            weights=weights_train,
         )
 
         self.logger.debug(
@@ -770,6 +778,8 @@ class RidgeModelEvaluator:
                 # Use the appropriately sized training data that respects train_size
                 X_cv = X_train
                 y_cv = y_train
+                # Use the corresponding weights subset for CV
+                weights_cv = weights_train
                 fold_size = test_size
                 n_samples = len(X_cv)  # Use the train data length, not full dataset
                 y_true_folds = []
@@ -809,6 +819,7 @@ class RidgeModelEvaluator:
                         penalty_factor=penalty_factor,
                         fixed_coefficients=formatted_fixed_coefficients,
                         fixed_intercept=fixed_intercept,
+                        weights=weights_cv[start_train:start_test] if weights_cv is not None else None,
                     )
                     model_cv.fit(x_tr_np, y_tr_np)
                     y_pred = model_cv.predict(X_te.to_numpy())
