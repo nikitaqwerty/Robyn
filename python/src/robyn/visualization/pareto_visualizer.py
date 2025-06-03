@@ -955,10 +955,19 @@ class ParetoVisualizer(BaseVisualizer):
         ax.set_facecolor("white")
 
         # Format dates on x-axis using datetime locator and formatter
-        years = mdates.YearLocator()
-        years_fmt = mdates.DateFormatter("%Y")
-        ax.xaxis.set_major_locator(years)
-        ax.xaxis.set_major_formatter(years_fmt)
+        # Use MonthLocator with interval to show months at reasonable intervals
+        # and format to show abbreviated month name with year
+        months = mdates.MonthLocator(interval=3)  # Show every 3 months to avoid overcrowding
+        months_fmt = mdates.DateFormatter("%b %Y")  # Format as "Jan 2023", "Apr 2023", etc.
+        ax.xaxis.set_major_locator(months)
+        ax.xaxis.set_major_formatter(months_fmt)
+
+        # Add minor ticks for individual months for finer granularity
+        minor_months = mdates.MonthLocator()  # Show all months as minor ticks
+        ax.xaxis.set_minor_locator(minor_months)
+
+        # Rotate x-axis labels for better readability
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
 
         logger.debug("Successfully generated fitted vs actual plot")
         if fig:
