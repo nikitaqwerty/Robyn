@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, List
 import os
 import logging
+import numpy as np
 
 from robyn.common.common_util import CommonUtils
 from robyn.common.common_util import CommonUtils
@@ -56,6 +57,7 @@ class ModelExecutor(BaseModelExecutor):
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
+        observation_weights: Optional[np.ndarray] = None,  # New parameter for observation weights
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -68,6 +70,8 @@ class ModelExecutor(BaseModelExecutor):
             hp_opt_score_target: Which NRMSE metric to use for hyperparameter optimization loss calculation.
                                Valid options: 'nrmse_train', 'nrmse_val', 'nrmse_test', 'nrmse_val_test'.
                                Default is 'nrmse_train'.
+            observation_weights: Optional array of observation weights for weighted regression.
+                               Should have the same length as the number of observations.
         """
         self.logger.info("Starting model execution with model_name=%s", model_name)
         self.logger.debug(
@@ -130,6 +134,7 @@ class ModelExecutor(BaseModelExecutor):
                     cv_n_folds=cv_n_folds,
                     cv_train_size=cv_train_size,
                     hp_opt_score_target=hp_opt_score_target,
+                    observation_weights=observation_weights,
                 )
                 self.logger.info("Model building completed successfully")
 

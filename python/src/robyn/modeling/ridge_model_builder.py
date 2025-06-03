@@ -166,6 +166,7 @@ class RidgeModelBuilder:
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
+        observation_weights: Optional[np.ndarray] = None,
     ) -> ModelOutputs:
         start_time = time.time()
 
@@ -228,6 +229,7 @@ class RidgeModelBuilder:
                 cv_n_folds=cv_n_folds,
                 cv_train_size=cv_train_size,
                 hp_opt_score_target=hp_opt_score_target,
+                observation_weights=observation_weights,
             )
             trials.append(trial_result)
         # Calculate convergence
