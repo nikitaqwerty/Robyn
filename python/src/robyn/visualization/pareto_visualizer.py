@@ -739,28 +739,20 @@ class ParetoVisualizer(BaseVisualizer):
         logger.debug(f"Successfully generated quarterly waterfall plots")
         return fig
 
-    def generate_fitted_vs_actual(
+    def _generate_fitted_vs_actual_base(
         self,
         solution_id: str,
         ax: Optional[plt.Axes] = None,
         metrics: Optional[Dict[str, float]] = None,
         test_rows: int = 5,
-        val_rows: int = 5,  # New parameter for validation rows
+        val_rows: int = 5,
         cv_validation: bool = True,
-    ) -> Optional[plt.Figure]:
-        """Generate time series plot comparing fitted vs actual values.
-
-        Args:
-            solution_id: ID of the solution to visualize
-            ax: Optional matplotlib axes to plot on. If None, creates new figure
-            metrics: Optional dictionary containing model performance metrics
-            test_rows: Number of last rows to use for testing (if 0, uses train_size from model)
-            val_rows: Number of rows to use for validation before test rows (if 0, uses train_size from model)
+    ) -> tuple[Optional[plt.Figure], Optional[plt.Axes]]:
+        """Helper method to generate the base fitted vs actual plot without closing the figure.
 
         Returns:
-            Optional[plt.Figure]: Generated matplotlib Figure object
+            tuple: (figure, axes) - figure is None if ax was provided, axes is the main axes
         """
-
         logger.debug("Starting generation of fitted vs actual plot")
 
         if solution_id not in self.pareto_result.plot_data_collect:
@@ -779,7 +771,7 @@ class ParetoVisualizer(BaseVisualizer):
                 logger.warning(
                     f"Invalid solution ID: {solution_id}. Solution not found in any available data."
                 )
-            return None
+            return None, None
 
         # Get data for specific solution
         plot_data = self.pareto_result.plot_data_collect[solution_id]
@@ -792,7 +784,7 @@ class ParetoVisualizer(BaseVisualizer):
 
         if ts_data.empty:
             logger.warning(f"No valid date data found for solution {solution_id}")
-            return None
+            return None, None
 
         ts_data["linetype"] = np.where(
             ts_data["variable"] == "predicted", "solid", "dotted"
@@ -989,6 +981,38 @@ class ParetoVisualizer(BaseVisualizer):
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         logger.debug("Successfully generated fitted vs actual plot")
+        return fig, ax
+
+    def generate_fitted_vs_actual(
+        self,
+        solution_id: str,
+        ax: Optional[plt.Axes] = None,
+        metrics: Optional[Dict[str, float]] = None,
+        test_rows: int = 5,
+        val_rows: int = 5,  # New parameter for validation rows
+        cv_validation: bool = True,
+    ) -> Optional[plt.Figure]:
+        """Generate time series plot comparing fitted vs actual values.
+
+        Args:
+            solution_id: ID of the solution to visualize
+            ax: Optional matplotlib axes to plot on. If None, creates new figure
+            metrics: Optional dictionary containing model performance metrics
+            test_rows: Number of last rows to use for testing (if 0, uses train_size from model)
+            val_rows: Number of rows to use for validation before test rows (if 0, uses train_size from model)
+
+        Returns:
+            Optional[plt.Figure]: Generated matplotlib Figure object
+        """
+        fig, ax_main = self._generate_fitted_vs_actual_base(
+            solution_id=solution_id,
+            ax=ax,
+            metrics=metrics,
+            test_rows=test_rows,
+            val_rows=val_rows,
+            cv_validation=cv_validation,
+        )
+
         if fig:
             plt.tight_layout()
             plt.subplots_adjust(top=0.85)
@@ -1923,6 +1947,7 @@ class ParetoVisualizer(BaseVisualizer):
             plot_funcs_solution = {
                 "waterfall": self.generate_waterfall,
                 "fitted_vs_actual": self.generate_fitted_vs_actual,
+                "fitted_vs_actual_vs_costs": self.generate_fitted_vs_actual_vs_costs,
                 "diagnostic_plot": self.generate_diagnostic_plot,
                 "immediate_vs_carryover": self.generate_immediate_vs_carryover,
                 "adstock_rate": self.generate_adstock_rate,
@@ -2001,7 +2026,10 @@ class ParetoVisualizer(BaseVisualizer):
                 for plot_name, plot_func in plot_funcs_solution.items():
                     full_name = f"({criteria_str})__{plot_name}_{solution_id}"
                     try:
-                        if plot_name == "fitted_vs_actual":
+                        if plot_name in [
+                            "fitted_vs_actual",
+                            "fitted_vs_actual_vs_costs",
+                        ]:
                             # Pass test_rows and val_rows when calling fitted_vs_actual
                             fig = plot_func(
                                 solution_id=solution_id,
@@ -2064,3 +2092,97 @@ class ParetoVisualizer(BaseVisualizer):
                 )
 
         logger.info("Finished plot generation and processing.")
+
+    def generate_fitted_vs_actual_vs_costs(
+        self,
+        solution_id: str,
+        ax: Optional[plt.Axes] = None,
+        metrics: Optional[Dict[str, float]] = None,
+        test_rows: int = 5,
+        val_rows: int = 5,
+        cv_validation: bool = True,
+        cost_colors: Optional[Dict[str, str]] = None,
+    ) -> Optional[plt.Figure]:
+        """Generate fitted vs actual plot with total paid media spend as secondary y-axis (single line)."""
+        # Step 1: Generate the base fitted vs actual plot using the helper method
+        fig, ax_main = self._generate_fitted_vs_actual_base(
+            solution_id=solution_id,
+            ax=ax,
+            metrics=metrics,
+            test_rows=test_rows,
+            val_rows=val_rows,
+            cv_validation=cv_validation,
+        )
+
+        if ax_main is None:
+            return None
+
+        # Step 2: Prepare the secondary y-axis for costs
+        ax_costs = ax_main.twinx()
+
+        # Step 3: Get the date range from the x-axis (should match fitted/actual plot)
+        plot_data = self.pareto_result.plot_data_collect[solution_id]
+        ts_data = plot_data["plot5data"]["xDecompVecPlotMelted"].copy()
+        ts_data["ds"] = pd.to_datetime(ts_data["ds"])
+        ts_data = ts_data.dropna(subset=["ds"])
+        date_range = ts_data["ds"].sort_values().unique()
+
+        # Step 4: Get the paid media spends data, aligned to the date range
+        spend_channels = self.mmm_data.mmmdata_spec.paid_media_spends or []
+        date_col = self.mmm_data.mmmdata_spec.date_var or "ds"
+        spend_df = self.mmm_data.data[[date_col] + spend_channels].copy()
+        spend_df[date_col] = pd.to_datetime(spend_df[date_col])
+        spend_df = spend_df[spend_df[date_col].isin(date_range)]
+        spend_df = spend_df.set_index(date_col).reindex(date_range).reset_index()
+        # Now spend_df[date_col] matches date_range order
+
+        # Step 5: Calculate the sum of all spend channels for each date
+        spend_df["total_spend"] = spend_df[spend_channels].sum(axis=1)
+
+        # Step 6: Plot the total spend as a single line on the secondary y-axis
+        (spend_line,) = ax_costs.plot(
+            spend_df[date_col],
+            spend_df["total_spend"],
+            label="Total Paid Media Spend",
+            linestyle=":",  # Dotted line
+            linewidth=2,
+            color="#2ca02c",  # A distinct green color
+            alpha=0.7,
+        )
+
+        # Step 7: Label and legend for secondary axis
+        ax_costs.set_ylabel("Total Paid Media Spend")
+        # Format y-axis with abbreviations
+        ax_costs.yaxis.set_major_formatter(ticker.FuncFormatter(self.format_number))
+        # Remove the secondary axis legend and add spends to the main legend
+        handles1, labels1 = ax_main.get_legend_handles_labels()
+        handles = handles1 + [spend_line]
+        labels = labels1 + ["Total Paid Media Spend"]
+        ax_main.legend(
+            handles,
+            labels,
+            bbox_to_anchor=(0.01, 1.02),  # Position at top-left
+            loc="lower left",
+            ncol=2,  # Two columns side by side
+            borderaxespad=0,
+            frameon=False,
+            fontsize=9,
+            handlelength=2,  # Length of the legend lines
+            handletextpad=0.5,  # Space between line and text
+            columnspacing=1.0,  # Space between columns
+        )
+        # Optionally, make the secondary y-axis grid less prominent
+        ax_costs.grid(False)
+
+        # Step 8: Adjust layout and return
+        if fig:
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.85)
+            fig = plt.gcf()
+
+            # Add metrics text using the helper method
+            self._add_metrics_to_plot(fig, metrics, solution_id)
+
+            plt.close(fig)
+            return fig
+        return None
