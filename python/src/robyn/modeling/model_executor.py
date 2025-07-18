@@ -1,18 +1,17 @@
 # model_executor.py
 # pyre-strict
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List
-import os
 import logging
-import numpy as np
+import os
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional
 
-from robyn.common.common_util import CommonUtils
+import numpy as np
 from robyn.common.common_util import CommonUtils
 from robyn.modeling.base_model_executor import BaseModelExecutor
-from robyn.modeling.entities.modelrun_trials_config import TrialsConfig
-from robyn.modeling.entities.enums import NevergradAlgorithm, Models
+from robyn.modeling.entities.enums import Models, NevergradAlgorithm
 from robyn.modeling.entities.modeloutputs import ModelOutputs
+from robyn.modeling.entities.modelrun_trials_config import TrialsConfig
 from robyn.modeling.ridge_model_builder import RidgeModelBuilder
 
 
@@ -57,7 +56,9 @@ class ModelExecutor(BaseModelExecutor):
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
-        observation_weights: Optional[np.ndarray] = None,  # New parameter for observation weights
+        observation_weights: Optional[
+            np.ndarray
+        ] = None,  # New parameter for observation weights
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -88,12 +89,25 @@ class ModelExecutor(BaseModelExecutor):
         try:
             self._validate_input()
             self.logger.debug("Input validation successful")
-            
+
             # Validate hp_opt_score_target parameter
-            valid_targets = ["nrmse_train", "nrmse_val", "nrmse_test", "nrmse_val_test"]
+            valid_targets = [
+                "nrmse_train",
+                "nrmse_val",
+                "nrmse_test",
+                "nrmse_val_test",
+                "mae_val",
+                "mape_val",
+                "rsq_train",
+                "rsq_val",
+            ]
             if hp_opt_score_target not in valid_targets:
-                raise ValueError(f"hp_opt_score_target must be one of {valid_targets}, got {hp_opt_score_target}")
-            self.logger.debug("hp_opt_score_target validation successful: %s", hp_opt_score_target)
+                raise ValueError(
+                    f"hp_opt_score_target must be one of {valid_targets}, got {hp_opt_score_target}"
+                )
+            self.logger.debug(
+                "hp_opt_score_target validation successful: %s", hp_opt_score_target
+            )
 
             cores = CommonUtils.get_cores_available(cores)
             self.logger.debug("Using %d cores for processing", cores)

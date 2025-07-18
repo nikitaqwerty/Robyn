@@ -1,10 +1,12 @@
+import json
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Tuple, List, Any, Optional
-from sklearn.linear_model import Ridge
-import logging
 from robyn.calibration.media_effect_calibration import MediaEffectCalibrator
-import json
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
 
 
 class RidgeMetricsCalculator:
@@ -104,31 +106,38 @@ class RidgeMetricsCalculator:
         self,
         y_true: np.ndarray,
         y_pred: np.ndarray,
-        p: int,
+        p: int = None,
         df_int: int = 1,
         n_train: Optional[int] = None,
+        observation_weights: Optional[np.ndarray] = None,
     ) -> float:
-        """Calculate R-squared score matching R's implementation exactly."""
-        # Match R's SSE calculation order
-        sse = np.sum((y_pred - y_true) ** 2)  # Changed order to match R
-        y_mean = np.mean(y_true)
-        sst = np.sum((y_true - y_mean) ** 2)
-        r2 = 1 - (sse / sst)
+        """Calculate R-squared score using sklearn's implementation.
 
-        if p is not None and df_int is not None:
-            n = n_train if n_train is not None else len(y_true)
-            rdf = n - p - 1  # R's degrees of freedom calculation
-            r2_adj = 1 - (1 - r2) * ((n - df_int) / rdf)
-            return float(r2_adj)
+        Args:
+            y_true: True values
+            y_pred: Predicted values
+            p: Number of predictors (not used with sklearn implementation)
+            df_int: Degrees of freedom for intercept (not used with sklearn implementation)
+            n_train: Number of training samples (not used with sklearn implementation)
+            observation_weights: Optional weights for error calculations
 
-        return float(r2)
+        Returns:
+            float: R-squared value
+        """
+        return float(r2_score(y_true, y_pred, sample_weight=observation_weights))
 
-    def calculate_nrmse(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    def calculate_nrmse(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        observation_weights: Optional[np.ndarray] = None,
+    ) -> float:
         """Calculate NRMSE matching R's implementation exactly.
 
         Args:
             y_true: True values
             y_pred: Predicted values
+            observation_weights: Optional weights for error calculations
 
         Returns:
             float: NRMSE value
@@ -136,8 +145,18 @@ class RidgeMetricsCalculator:
         y_true = np.asarray(y_true)
         y_pred = np.asarray(y_pred)
 
-        # Calculate RMSE exactly as R does
-        rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
+        if observation_weights is not None:
+            observation_weights = np.asarray(observation_weights)
+            if len(observation_weights) != len(y_true):
+                raise ValueError("observation_weights must have same length as y_true")
+
+            # Calculate weighted RMSE
+            rmse = np.sqrt(
+                np.average((y_true - y_pred) ** 2, weights=observation_weights)
+            )
+        else:
+            # Calculate RMSE exactly as R does
+            rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
 
         # Calculate range using max-min of y_true only (like R)
         y_range = np.max(y_true) - np.min(y_true)
@@ -146,6 +165,91 @@ class RidgeMetricsCalculator:
         nrmse = rmse / y_range if y_range > 0 else np.nan
 
         return float(nrmse)
+
+    def calculate_mae(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        observation_weights: Optional[np.ndarray] = None,
+    ) -> float:
+        """Calculate Mean Absolute Error (MAE) with optional observation weights.
+
+        Args:
+            y_true: True values
+            y_pred: Predicted values
+            observation_weights: Optional weights for error calculations
+
+        Returns:
+            float: MAE value
+        """
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        if observation_weights is not None:
+            observation_weights = np.asarray(observation_weights)
+            if len(observation_weights) != len(y_true):
+                raise ValueError("observation_weights must have same length as y_true")
+
+            # Calculate weighted MAE
+            mae = np.average(np.abs(y_true - y_pred), weights=observation_weights)
+        else:
+            # Calculate MAE without weights
+            mae = np.mean(np.abs(y_true - y_pred))
+
+        return float(mae)
+
+    def calculate_mape(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        observation_weights: Optional[np.ndarray] = None,
+    ) -> float:
+        """Calculate Mean Absolute Percentage Error (MAPE) with optional observation weights.
+
+        Args:
+            y_true: True values
+            y_pred: Predicted values
+            observation_weights: Optional weights for error calculations
+
+        Returns:
+            float: MAPE value (as percentage, e.g., 5.0 for 5%)
+        """
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+
+        # Avoid division by zero in MAPE calculation
+        nonzero_mask = y_true != 0
+        if not np.any(nonzero_mask):
+            return np.nan
+
+        # Calculate absolute percentage errors only for non-zero values
+        y_true_nonzero = y_true[nonzero_mask]
+        y_pred_nonzero = y_pred[nonzero_mask]
+
+        if observation_weights is not None:
+            observation_weights = np.asarray(observation_weights)
+            if len(observation_weights) != len(y_true):
+                raise ValueError("observation_weights must have same length as y_true")
+
+            # Apply weights only to non-zero values
+            weights_nonzero = observation_weights[nonzero_mask]
+
+            # Calculate weighted MAPE
+            mape = (
+                np.average(
+                    np.abs((y_true_nonzero - y_pred_nonzero) / y_true_nonzero),
+                    weights=weights_nonzero,
+                )
+                * 100
+            )
+        else:
+            # Calculate MAPE without weights
+            mape = (
+                np.mean(np.abs((y_true_nonzero - y_pred_nonzero) / y_true_nonzero))
+                * 100
+            )
+
+        return float(mape)
 
     def model_decomp(
         self,

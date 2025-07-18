@@ -1,22 +1,23 @@
-import pandas as pd
-import numpy as np
-import nevergrad as ng
-from nevergrad.optimization.base import Optimizer
+import json
+import logging
+import random
 import time
 import warnings
-from tqdm import tqdm
-from sklearn.linear_model import Ridge
-from sklearn.exceptions import ConvergenceWarning
-from typing import Dict, Any, Tuple, Optional, List, Union
-from robyn.modeling.entities.modeloutputs import Trial
-from robyn.modeling.entities.enums import NevergradAlgorithm
-from robyn.modeling.ridge.ridge_metrics_calculator import RidgeMetricsCalculator
-import logging
-from robyn.modeling.ridge.models.ridge_utils import create_ridge_model_rpy2
-import json
 from datetime import datetime
-import random
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import nevergrad as ng
+import numpy as np
+import pandas as pd
+from nevergrad.optimization.base import Optimizer
+from robyn.modeling.entities.enums import NevergradAlgorithm
+from robyn.modeling.entities.modeloutputs import Trial
+from robyn.modeling.ridge.models.ridge_utils import create_ridge_model_rpy2
+from robyn.modeling.ridge.ridge_metrics_calculator import RidgeMetricsCalculator
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.linear_model import Ridge
+from tqdm import tqdm
 
 
 class RidgeModelEvaluator:
@@ -205,7 +206,7 @@ class RidgeModelEvaluator:
                         "lambda_min_ratio": float(result["lambda_min_ratio"]),
                         "iterNG": int(iter_ng + 1),
                         "iterPar": 1,
-                        "train_size": float(result["train_size"]),  # Add train_size to params
+                        "train_size": float(result["train_size"]),
                     }
                 )
 
@@ -389,13 +390,21 @@ class RidgeModelEvaluator:
             X_train = X.iloc[start_idx:total_train_size]
             y_train = y.iloc[start_idx:total_train_size]
             # Subset weights if provided
-            weights_train = observation_weights[start_idx:total_train_size] if observation_weights is not None else None
+            weights_train = (
+                observation_weights[start_idx:total_train_size]
+                if observation_weights is not None
+                else None
+            )
         else:
             # If train_size = 1.0, use all available training data
             X_train = X.iloc[:total_train_size]
             y_train = y.iloc[:total_train_size]
             # Subset weights if provided
-            weights_train = observation_weights[:total_train_size] if observation_weights is not None else None
+            weights_train = (
+                observation_weights[:total_train_size]
+                if observation_weights is not None
+                else None
+            )
 
         # Fixed validation and test sets (only when ts_validation is True)
         if ts_validation:
@@ -687,9 +696,10 @@ class RidgeModelEvaluator:
             y_train_pred,
             p=x_norm.shape[1],
             df_int=model.df_int,
+            observation_weights=weights_train,
         )
         metrics["nrmse_train"] = self.ridge_metrics_calculator.calculate_nrmse(
-            y_norm, y_train_pred
+            y_norm, y_train_pred, observation_weights=weights_train
         )
 
         # Validation and test metrics
@@ -701,12 +711,24 @@ class RidgeModelEvaluator:
 
             n_train = len(y_train)
 
+            # Get weights for validation and test sets
+            weights_val = None
+            weights_test = None
+            if observation_weights is not None:
+                val_start_idx = total_train_size
+                val_end_idx = total_train_size + val_size
+                test_start_idx = total_train_size + val_size
+                test_end_idx = total_train_size + val_size + test_size
+                weights_val = observation_weights[val_start_idx:val_end_idx]
+                weights_test = observation_weights[test_start_idx:test_end_idx]
+
             metrics["rsq_val"] = self.ridge_metrics_calculator.calculate_r2_score(
                 y_val,
                 y_val_pred,
                 p=X_val.shape[1],
                 df_int=model.df_int,
                 n_train=n_train,
+                observation_weights=weights_val,
             )
             metrics["rsq_test"] = self.ridge_metrics_calculator.calculate_r2_score(
                 y_test,
@@ -714,19 +736,26 @@ class RidgeModelEvaluator:
                 p=X_test.shape[1],
                 df_int=model.df_int,
                 n_train=n_train,
+                observation_weights=weights_test,
             )
             metrics["nrmse_val"] = self.ridge_metrics_calculator.calculate_nrmse(
-                y_val, y_val_pred
+                y_val, y_val_pred, observation_weights=weights_val
             )
             metrics["nrmse_test"] = self.ridge_metrics_calculator.calculate_nrmse(
-                y_test, y_test_pred
+                y_test, y_test_pred, observation_weights=weights_test
             )
 
             # Calculate NRMSE on combined validation and test sets
             y_val_test = np.concatenate([y_val, y_test])
             y_val_test_pred = np.concatenate([y_val_pred, y_test_pred])
+            # Combine weights for validation and test sets
+            weights_val_test_combined = None
+            if observation_weights is not None:
+                weights_val_test_combined = np.concatenate([weights_val, weights_test])
             metrics["nrmse_val_test"] = self.ridge_metrics_calculator.calculate_nrmse(
-                y_val_test, y_val_test_pred
+                y_val_test,
+                y_val_test_pred,
+                observation_weights=weights_val_test_combined,
             )
 
             # Set the NRMSE metric for loss calculation based on hp_opt_score_target parameter
@@ -734,25 +763,26 @@ class RidgeModelEvaluator:
                 metrics["nrmse"] = metrics[hp_opt_score_target]
             else:
                 # Fallback to nrmse_val_test (the default behavior for this case) if requested metric is not available
-                self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_val_test'")
+                self.logger.warning(
+                    f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_val_test'"
+                )
                 metrics["nrmse"] = metrics["nrmse_val_test"]
 
-            # Calculate MAE and MAPE for concatenated predictions
-            metrics["mae_val"] = np.mean(np.abs(y_val_test - y_val_test_pred))
-            # Avoid division by zero in MAPE calculation
-            nonzero_mask = y_val_test != 0
-            if np.any(nonzero_mask):
-                metrics["mape"] = (
-                    np.mean(
-                        np.abs(
-                            (y_val_test[nonzero_mask] - y_val_test_pred[nonzero_mask])
-                            / y_val_test[nonzero_mask]
-                        )
-                    )
-                    * 100
-                )
-            else:
-                metrics["mape"] = np.nan
+            # Calculate MAE and MAPE for concatenated predictions using the metrics calculator
+            # Get appropriate weights for validation/test data
+            weights_val_test = None
+            if observation_weights is not None:
+                # Calculate the start index for validation data
+                val_start_idx = total_train_size
+                val_end_idx = total_train_size + val_size + test_size
+                weights_val_test = observation_weights[val_start_idx:val_end_idx]
+
+            metrics["mae_val"] = self.ridge_metrics_calculator.calculate_mae(
+                y_val_test, y_val_test_pred, observation_weights=weights_val_test
+            )
+            metrics["mape"] = self.ridge_metrics_calculator.calculate_mape(
+                y_val_test, y_val_test_pred, observation_weights=weights_val_test
+            )
 
             # Log the combined NRMSE calculation
             self.logger.debug(
@@ -819,7 +849,11 @@ class RidgeModelEvaluator:
                         penalty_factor=penalty_factor,
                         fixed_coefficients=formatted_fixed_coefficients,
                         fixed_intercept=fixed_intercept,
-                        weights=observation_weights_cv[start_train:start_test] if observation_weights_cv is not None else None,
+                        weights=(
+                            observation_weights_cv[start_train:start_test]
+                            if observation_weights_cv is not None
+                            else None
+                        ),
                     )
                     model_cv.fit(x_tr_np, y_tr_np)
                     y_pred = model_cv.predict(X_te.to_numpy())
@@ -830,6 +864,22 @@ class RidgeModelEvaluator:
                 if y_true_folds and y_pred_folds:
                     y_true_concat = np.concatenate(y_true_folds)
                     y_pred_concat = np.concatenate(y_pred_folds)
+
+                    # Calculate weights for concatenated CV predictions
+                    weights_cv_concat = None
+                    if observation_weights_cv is not None:
+                        # Reconstruct weights for concatenated CV predictions
+                        weights_cv_concat = []
+                        for k in range(cv_n_folds):
+                            end_test = n_samples - k * fold_size
+                            start_test = end_test - fold_size
+                            if start_test < 1:
+                                continue
+                            weights_cv_concat.extend(
+                                observation_weights_cv[start_test:end_test]
+                            )
+                        weights_cv_concat = np.array(weights_cv_concat)
+
                     metrics["rsq_val"] = (
                         self.ridge_metrics_calculator.calculate_r2_score(
                             y_true_concat,
@@ -837,32 +887,27 @@ class RidgeModelEvaluator:
                             p=X_cv.shape[1],  # Use X_cv shape
                             df_int=df_int_last,
                             n_train=len(y_train),
+                            observation_weights=weights_cv_concat,
                         )
                     )
                     metrics["nrmse_val"] = (
                         self.ridge_metrics_calculator.calculate_nrmse(
-                            y_true_concat, y_pred_concat
+                            y_true_concat,
+                            y_pred_concat,
+                            observation_weights=weights_cv_concat,
                         )
                     )
-                    # Calculate MAE and MAPE for concatenated predictions
-                    metrics["mae_val"] = np.mean(np.abs(y_true_concat - y_pred_concat))
-                    # Avoid division by zero in MAPE calculation
-                    nonzero_mask = y_true_concat != 0
-                    if np.any(nonzero_mask):
-                        metrics["mape_val"] = (
-                            np.mean(
-                                np.abs(
-                                    (
-                                        y_true_concat[nonzero_mask]
-                                        - y_pred_concat[nonzero_mask]
-                                    )
-                                    / y_true_concat[nonzero_mask]
-                                )
-                            )
-                            * 100
-                        )
-                    else:
-                        metrics["mape_val"] = np.nan
+                    # Calculate MAE and MAPE for concatenated predictions using the metrics calculator
+                    metrics["mae_val"] = self.ridge_metrics_calculator.calculate_mae(
+                        y_true_concat,
+                        y_pred_concat,
+                        observation_weights=weights_cv_concat,
+                    )
+                    metrics["mape_val"] = self.ridge_metrics_calculator.calculate_mape(
+                        y_true_concat,
+                        y_pred_concat,
+                        observation_weights=weights_cv_concat,
+                    )
                 else:
                     metrics["rsq_val"] = 0.0
                     metrics["nrmse_val"] = 0.0
@@ -872,7 +917,9 @@ class RidgeModelEvaluator:
                     metrics["nrmse"] = metrics[hp_opt_score_target]
                 else:
                     # Fallback to nrmse_train if the requested metric is not available
-                    self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'")
+                    self.logger.warning(
+                        f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'"
+                    )
                     metrics["nrmse"] = metrics["nrmse_train"]
                 metrics["rsq_test"] = 0.0
                 metrics["nrmse_test"] = 0.0
@@ -889,7 +936,9 @@ class RidgeModelEvaluator:
                     metrics["nrmse"] = metrics[hp_opt_score_target]
                 else:
                     # Fallback to nrmse_train if the requested metric is not available
-                    self.logger.warning(f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'")
+                    self.logger.warning(
+                        f"Requested hp_opt_score_target '{hp_opt_score_target}' not available, falling back to 'nrmse_train'"
+                    )
                     metrics["nrmse"] = metrics["nrmse_train"]
 
         # Ensure defaults if missing
