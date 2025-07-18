@@ -1,23 +1,22 @@
-from pathlib import Path
+import logging
 import re
+from pathlib import Path
 from typing import Dict, List, Optional, Union
-from matplotlib import ticker
+
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from robyn.modeling.entities.modeloutputs import ModelOutputs
 import seaborn as sns
-import logging
-from robyn.data.entities.enums import ProphetVariableType
+from matplotlib import ticker
+from robyn.data.entities.enums import DependentVarType, ProphetVariableType
 from robyn.data.entities.holidays_data import HolidaysData
-from robyn.modeling.entities.featurized_mmm_data import FeaturizedMMMData
-from robyn.modeling.entities.pareto_result import ParetoResult
 from robyn.data.entities.hyperparameters import AdstockType, Hyperparameters
 from robyn.data.entities.mmmdata import MMMData
+from robyn.modeling.entities.featurized_mmm_data import FeaturizedMMMData
+from robyn.modeling.entities.modeloutputs import ModelOutputs
+from robyn.modeling.entities.pareto_result import ParetoResult
 from robyn.visualization.base_visualizer import BaseVisualizer
-from robyn.data.entities.enums import DependentVarType
-import math
-import matplotlib.dates as mdates
 
 logger = logging.getLogger(__name__)
 
@@ -747,6 +746,7 @@ class ParetoVisualizer(BaseVisualizer):
         metrics: Optional[Dict[str, float]] = None,
         test_rows: int = 5,
         val_rows: int = 5,  # New parameter for validation rows
+        cv_validation: bool = True,
     ) -> Optional[plt.Figure]:
         """Generate time series plot comparing fitted vs actual values.
 
@@ -855,50 +855,65 @@ class ParetoVisualizer(BaseVisualizer):
             total_days = len(unique_dates)
 
             if total_days > 0:
-                # Handle split calculations based on test_rows and val_rows parameters
-                if test_rows > 0 and test_rows < total_days:
-                    # Use specified test_rows
-                    test_start_idx = total_days - test_rows
-
-                    # Determine validation size based on val_rows parameter
-                    if val_rows > 0 and val_rows < (total_days - test_rows):
-                        val_start_idx = test_start_idx - val_rows
+                if cv_validation:
+                    # CV validation mode: Only Train and CV Val
+                    cv_val_rows = val_rows * 3
+                    if cv_val_rows > 0 and cv_val_rows < total_days:
+                        cv_val_start_idx = total_days - cv_val_rows
+                        train_pct = cv_val_start_idx / total_days
+                        cv_val_pct = cv_val_rows / total_days
+                        splits = [
+                            ("Train", 0, train_pct),
+                            ("CV Validation", cv_val_start_idx, cv_val_pct),
+                        ]
                     else:
-                        # Default: equal to test size or remaining space
-                        val_rows = min(test_rows, test_start_idx)
-                        val_start_idx = test_start_idx - val_rows
-
-                    # Calculate actual percentages for display
-                    test_pct = test_rows / total_days
-                    val_pct = val_rows / total_days
-                    train_pct = 1 - (test_pct + val_pct)
-
-                    # Define splits as starting points of each section
-                    splits = [
-                        ("Train", 0, train_pct),
-                        ("Validation", val_start_idx, val_pct),
-                        ("Test", test_start_idx, test_pct),
-                    ]
+                        # Fallback: all train
+                        splits = [("Train", 0, 1.0)]
                 else:
-                    # Use train_size from model
-                    # Calculate split points using percentages
-                    train_cut = int(total_days * train_size)
+                    # Handle split calculations based on test_rows and val_rows parameters
+                    if test_rows > 0 and test_rows < total_days:
+                        # Use specified test_rows
+                        test_start_idx = total_days - test_rows
 
-                    # Calculate remaining portion
-                    remaining = 1 - train_size
+                        # Determine validation size based on val_rows parameter
+                        if val_rows > 0 and val_rows < (total_days - test_rows):
+                            val_start_idx = test_start_idx - val_rows
+                        else:
+                            # Default: equal to test size or remaining space
+                            val_rows = min(test_rows, test_start_idx)
+                            val_start_idx = test_start_idx - val_rows
 
-                    # Split remaining portion between val and test
-                    val_portion = remaining / 2  # Equal split
-                    test_portion = remaining - val_portion
+                        # Calculate actual percentages for display
+                        test_pct = test_rows / total_days
+                        val_pct = val_rows / total_days
+                        train_pct = 1 - (test_pct + val_pct)
 
-                    val_cut = train_cut + int(total_days * val_portion)
+                        # Define splits as starting points of each section
+                        splits = [
+                            ("Train", 0, train_pct),
+                            ("Validation", val_start_idx, val_pct),
+                            ("Test", test_start_idx, test_pct),
+                        ]
+                    else:
+                        # Use train_size from model
+                        # Calculate split points using percentages
+                        train_cut = int(total_days * train_size)
 
-                    # Define splits as starting points of each section
-                    splits = [
-                        ("Train", 0, train_size),
-                        ("Validation", train_cut, val_portion),
-                        ("Test", val_cut, test_portion),
-                    ]
+                        # Calculate remaining portion
+                        remaining = 1 - train_size
+
+                        # Split remaining portion between val and test
+                        val_portion = remaining / 2  # Equal split
+                        test_portion = remaining - val_portion
+
+                        val_cut = train_cut + int(total_days * val_portion)
+
+                        # Define splits as starting points of each section
+                        splits = [
+                            ("Train", 0, train_size),
+                            ("Validation", train_cut, val_portion),
+                            ("Test", val_cut, test_portion),
+                        ]
 
                 # Get y-axis limits for text placement
                 y_min, y_max = ax.get_ylim()
@@ -957,8 +972,12 @@ class ParetoVisualizer(BaseVisualizer):
         # Format dates on x-axis using datetime locator and formatter
         # Use MonthLocator with interval to show months at reasonable intervals
         # and format to show abbreviated month name with year
-        months = mdates.MonthLocator(interval=3)  # Show every 3 months to avoid overcrowding
-        months_fmt = mdates.DateFormatter("%b %Y")  # Format as "Jan 2023", "Apr 2023", etc.
+        months = mdates.MonthLocator(
+            interval=3
+        )  # Show every 3 months to avoid overcrowding
+        months_fmt = mdates.DateFormatter(
+            "%b %Y"
+        )  # Format as "Jan 2023", "Apr 2023", etc.
         ax.xaxis.set_major_locator(months)
         ax.xaxis.set_major_formatter(months_fmt)
 
@@ -967,7 +986,7 @@ class ParetoVisualizer(BaseVisualizer):
         ax.xaxis.set_minor_locator(minor_months)
 
         # Rotate x-axis labels for better readability
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
         logger.debug("Successfully generated fitted vs actual plot")
         if fig:
@@ -1713,7 +1732,7 @@ class ParetoVisualizer(BaseVisualizer):
         if sol_id is not None:
             # Use explicitly provided solution ID
             logger.info(f"Using explicitly provided solution ID: {sol_id}")
-            
+
             # Validate that the solution ID exists in the data
             if sol_id not in self.pareto_result.plot_data_collect:
                 # Check if solution exists in unfiltered results
@@ -1722,19 +1741,24 @@ class ParetoVisualizer(BaseVisualizer):
                     unfiltered_df = self.unfiltered_pareto_result.result_hyp_param
                     # Check both possible column names for solution ID
                     for col_name in ["sol_id", "solID"]:
-                        if col_name in unfiltered_df.columns and sol_id in unfiltered_df[col_name].values:
+                        if (
+                            col_name in unfiltered_df.columns
+                            and sol_id in unfiltered_df[col_name].values
+                        ):
                             sol_id_found = True
                             break
-                
+
                 if sol_id_found:
                     logger.warning(
                         f"Solution ID {sol_id} found in unfiltered results but not in plot_data_collect. "
                         "This solution's plot data was not generated."
                     )
                 else:
-                    logger.error(f"Invalid solution ID: {sol_id}. Solution not found in any available data.")
+                    logger.error(
+                        f"Invalid solution ID: {sol_id}. Solution not found in any available data."
+                    )
                     return
-            
+
             # Use the explicit solution ID for all criteria
             target_solutions = {"explicit_sol_id": sol_id}
             solution_ids_to_plot = [sol_id]
