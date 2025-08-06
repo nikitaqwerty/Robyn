@@ -985,6 +985,35 @@ class AllocatorVisualizer(BaseVisualizer):
         """
 
         try:
+            # Calculate saturation points if requested
+            if calculate_saturation:
+                saturation_export_path = None
+                if export_location is not None:
+                    export_path = Path(export_location)
+                    method_suffix = saturation_method.replace("_", "-")
+                    if saturation_method == "response_based":
+                        threshold_suffix = f"{int(saturation_percentage*100)}pct"
+                    else:
+                        threshold_suffix = f"{int(marginal_threshold*100)}pct"
+                    saturation_export_path = (
+                        export_path
+                        / f"saturation_points_{method_suffix}_{threshold_suffix}.csv"
+                    )
+
+                if not quiet:
+                    logger.info(
+                        f"Calculating saturation points using {saturation_method} method"
+                    )
+
+                self.calculate_saturation_points(
+                    saturation_percentage=saturation_percentage,
+                    method=saturation_method,
+                    marginal_threshold=marginal_threshold,
+                    export_path=(
+                        str(saturation_export_path) if saturation_export_path else None
+                    ),
+                )
+
             plots = {
                 "budget_opt": self._plot_response_spend_comparison(),
                 "allocation": self._plot_allocation_comparison(),
@@ -1016,4 +1045,170 @@ class AllocatorVisualizer(BaseVisualizer):
 
         except Exception as e:
             logger.error("Failed to generate all plots: %s", str(e))
+            raise
+
+    def calculate_saturation_points(
+        self,
+        saturation_percentage: float = 0.8,
+        method: str = "response_based",
+        marginal_threshold: float = 0.1,
+        export_path: str = None,
+    ) -> pd.DataFrame:
+        """
+        Calculate saturation points for each channel and export to CSV.
+
+        Args:
+            saturation_percentage: For 'response_based' method - percentage of max response
+                                 to define as saturation (default 0.8 = 80%)
+            method: Method to calculate saturation ('response_based' or 'marginal_based')
+                   - 'response_based': Find spend where response reaches X% of maximum
+                   - 'marginal_based': Find spend where marginal return drops below threshold
+            marginal_threshold: For 'marginal_based' method - threshold for marginal return
+                              as percentage of initial marginal return (default 0.1 = 10%)
+            export_path: Path to save the CSV file (optional)
+
+        Returns:
+            DataFrame with columns: year_month, spend_name, current_spend, saturation_point
+        """
+        try:
+            logger.info("Calculating saturation points for all channels")
+
+            # Get date information
+            date_min = self.dt_optim_out["date_min"].iloc[0]
+            date_max = self.dt_optim_out["date_max"].iloc[0]
+
+            # Extract year_month from the date range
+            # Using the middle of the date range as representative
+            if (
+                pd.to_datetime(date_min).year == pd.to_datetime(date_max).year
+                and pd.to_datetime(date_min).month == pd.to_datetime(date_max).month
+            ):
+                year_month = pd.to_datetime(date_min).strftime("%Y-%m")
+            else:
+                # If date range spans multiple months, use the end date
+                year_month = pd.to_datetime(date_max).strftime("%Y-%m")
+
+            saturation_data = []
+
+            # Get channel data from budget allocator
+            channels = self.budget_allocator.channel_for_allocation
+
+            for channel in channels:
+                # Get current spend
+                current_spend = self.dt_optim_out.loc[
+                    self.dt_optim_out["channels"] == channel, "initSpendUnit"
+                ].iloc[0]
+
+                # Calculate response curve to find saturation point
+                # Create a fine grid of spend values
+                max_spend = current_spend * 100  # Look far ahead
+                spend_grid = np.linspace(0, max_spend, 10000)
+
+                # Get parameters for this channel
+                coeff = self.budget_allocator.coefs_eval[channel]
+                alpha = self.budget_allocator.alphas_eval[f"{channel}_alphas"]
+                inflexion = self.budget_allocator.inflexions_eval[f"{channel}_gammas"]
+                theta = self.budget_allocator.thetas[channel]
+
+                # Calculate carryover effect
+                hist_carryover = self.budget_allocator.hist_carryover_eval[channel]
+                x_hist_carryover = np.mean(hist_carryover)
+
+                # Calculate responses for all spend levels
+                responses = []
+                for spend in spend_grid:
+                    response = self.budget_allocator._fx_objective(
+                        x=spend,
+                        coeff=coeff,
+                        alpha=alpha,
+                        inflexion=inflexion,
+                        x_hist_carryover=x_hist_carryover,
+                        theta=theta,
+                        get_sum=False,
+                    )
+                    responses.append(response)
+
+                responses = np.array(responses)
+
+                # Calculate saturation based on selected method
+                if method == "response_based":
+                    # The maximum theoretical response is when Hill saturation = 1
+                    # So max_response = coeff * 1 = coeff
+                    max_theoretical_response = coeff
+
+                    # Find the spend level where we reach saturation_percentage of max response
+                    target_response = max_theoretical_response * saturation_percentage
+
+                    # Find the first spend value where response >= target_response
+                    saturation_idx = np.where(responses >= target_response)[0]
+
+                    if len(saturation_idx) > 0:
+                        saturation_spend = spend_grid[saturation_idx[0]]
+                    else:
+                        # If we never reach the target, set saturation point to max tested spend
+                        saturation_spend = max_spend
+                        logger.warning(
+                            f"Channel {channel} never reaches {saturation_percentage*100}% saturation"
+                        )
+
+                elif method == "marginal_based":
+                    # Calculate marginal returns (derivative approximation)
+                    marginal_returns = np.diff(responses) / np.diff(spend_grid)
+
+                    # Get initial marginal return (at current spend level)
+                    current_idx = np.argmin(np.abs(spend_grid - current_spend))
+                    if current_idx >= len(marginal_returns):
+                        current_idx = len(marginal_returns) - 1
+                    initial_marginal = (
+                        marginal_returns[current_idx]
+                        if current_idx < len(marginal_returns)
+                        else marginal_returns[0]
+                    )
+
+                    # Find where marginal return drops below threshold
+                    threshold_return = initial_marginal * marginal_threshold
+                    below_threshold = np.where(marginal_returns < threshold_return)[0]
+
+                    if len(below_threshold) > 0:
+                        # Use the midpoint of the interval where threshold is crossed
+                        saturation_idx = below_threshold[0]
+                        saturation_spend = (
+                            spend_grid[saturation_idx] + spend_grid[saturation_idx + 1]
+                        ) / 2
+                    else:
+                        saturation_spend = max_spend
+                        logger.warning(
+                            f"Channel {channel} marginal return never drops below {marginal_threshold*100}% threshold"
+                        )
+                else:
+                    raise ValueError(
+                        f"Unknown method: {method}. Use 'response_based' or 'marginal_based'"
+                    )
+
+                saturation_data.append(
+                    {
+                        "year_month": year_month,
+                        "spend_name": channel,
+                        "current_spend": current_spend,
+                        "saturation_point": saturation_spend,
+                    }
+                )
+
+                logger.debug(
+                    f"Channel {channel}: current_spend={current_spend:.2f}, "
+                    f"saturation_point={saturation_spend:.2f}"
+                )
+
+            # Create DataFrame
+            saturation_df = pd.DataFrame(saturation_data)
+
+            # Export to CSV if path provided
+            if export_path:
+                saturation_df.to_csv(export_path, index=False)
+                logger.info(f"Saturation points exported to {export_path}")
+
+            return saturation_df
+
+        except Exception as e:
+            logger.error(f"Failed to calculate saturation points: {str(e)}")
             raise
