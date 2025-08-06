@@ -1,12 +1,13 @@
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from typing import Dict, Any, Union
-from pathlib import Path
-import seaborn as sns
-import matplotlib.pyplot as plt
 import logging
+from pathlib import Path
+from typing import Any, Dict, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import seaborn as sns
+from plotly.subplots import make_subplots
 from robyn.allocator.allocator import BudgetAllocator
 from robyn.visualization.base_visualizer import BaseVisualizer
 
@@ -528,7 +529,7 @@ class AllocatorVisualizer(BaseVisualizer):
             self.logger.error("Failed to create allocation comparison plot: %s", str(e))
             raise
 
-    def _plot_response_curves(self):
+    def _plot_response_curves(self, projection_limit: float = None):
         """Create response curves plot with solid line up to initial spend and dotted extension."""
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -596,7 +597,10 @@ class AllocatorVisualizer(BaseVisualizer):
                 initial_spend = 0
 
             # Set x-axis limit
-            right_limit = max(min(initial_spend * 5, 50000000), 3000000)
+            if projection_limit is not None:
+                right_limit = projection_limit
+            else:
+                right_limit = max(min(initial_spend * 5, 50000000), 3000000)
 
             # Carryover area
             carryover_data = channel_data[
@@ -633,10 +637,9 @@ class AllocatorVisualizer(BaseVisualizer):
             )
 
             # Projection segment (after initial_spend)
-            projection_limit = right_limit
             projection_data = channel_data[
                 (channel_data["spend"] > initial_spend)
-                & (channel_data["spend"] <= projection_limit)
+                & (channel_data["spend"] <= right_limit)
             ]
 
             fig.add_trace(
@@ -786,6 +789,27 @@ class AllocatorVisualizer(BaseVisualizer):
             # Get response curve data
             plotDT_scurve = self.eval_list["plotDT_scurve"]
 
+            # --- Find max Y value across all channels for the current max_projection_spend ---
+            max_y = 0
+            for i, channel in enumerate(self.dt_optim_out["channels"]):
+                channel_data = plotDT_scurve[plotDT_scurve["channel"] == channel]
+                initial_spend = self.dt_optim_out["initSpendUnit"].iloc[i]
+                if initial_spend < 500000:
+                    projection_limit = min(5000000, max_projection_spend)
+                else:
+                    projection_limit = min(initial_spend * 10, max_projection_spend)
+                projection_limit = max_projection_spend  # TODO: remove this hardcoded value and fix the logic for projection limit
+                # Only consider data up to projection_limit
+                y_vals = channel_data[(channel_data["spend"] <= projection_limit)][
+                    "total_response"
+                ].values
+                if len(y_vals) > 0:
+                    max_y = max(max_y, np.nanmax(y_vals))
+            if max_y == 0:
+                max_y = 1  # fallback to avoid empty plot
+            yaxis_range = [0, max_y * 1.05]  # add 5% headroom
+            # -----------------------------------------------------------------------------
+
             # Add channels section header to legend (dummy trace)
             fig.add_trace(
                 go.Scatter(
@@ -816,6 +840,8 @@ class AllocatorVisualizer(BaseVisualizer):
                     projection_limit = min(5000000, max_projection_spend)
                 else:
                     projection_limit = min(initial_spend * 10, max_projection_spend)
+
+                projection_limit = max_projection_spend  # TODO: remove this hardcoded value and fix the logic for projection limit
 
                 # Filter data for historical part (up to initial spend)
                 historical_data = channel_data[channel_data["spend"] <= initial_spend]
@@ -926,6 +952,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 ],  # Set X-axis limit to max_projection_spend
             )
 
+            # Set Y axis range to fit all curves
             fig.update_yaxes(
                 tickformat=",",
                 showgrid=True,
@@ -934,6 +961,7 @@ class AllocatorVisualizer(BaseVisualizer):
                 zeroline=True,
                 zerolinewidth=1,
                 zerolinecolor="rgba(128, 128, 128, 0.2)",
+                range=yaxis_range,
             )
 
             return fig
@@ -960,9 +988,21 @@ class AllocatorVisualizer(BaseVisualizer):
             plots = {
                 "budget_opt": self._plot_response_spend_comparison(),
                 "allocation": self._plot_allocation_comparison(),
-                "response": self._plot_response_curves(),
-                "combined_response": self._plot_combined_response_curves(
-                    max_projection_spend=50000000
+                # Three response curves with different projection limits
+                "response_10M": self._plot_response_curves(projection_limit=10_000_000),
+                "response_50M": self._plot_response_curves(projection_limit=50_000_000),
+                "response_100M": self._plot_response_curves(
+                    projection_limit=100_000_000
+                ),
+                # Three combined response curves with different projection limits
+                "combined_response_10M": self._plot_combined_response_curves(
+                    max_projection_spend=10_000_000
+                ),
+                "combined_response_50M": self._plot_combined_response_curves(
+                    max_projection_spend=50_000_000
+                ),
+                "combined_response_100M": self._plot_combined_response_curves(
+                    max_projection_spend=100_000_000
                 ),
             }
 
