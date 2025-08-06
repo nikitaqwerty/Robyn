@@ -1,12 +1,12 @@
 # pyre-strict
+import csv
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
 from robyn.data.entities.enums import DependentVarType
 from robyn.data.entities.mmmdata import MMMData
 from robyn.modeling.entities.pareto_result import ParetoResult
@@ -1051,6 +1051,183 @@ class TransformationVisualizer(BaseVisualizer):
         )
         return fig
 
+    def dump_monthly_spend_effect_csv(
+        self,
+        solution_id: str,
+        filepath: Union[str, Path] = None,
+    ) -> Optional[str]:
+        """
+        Dump monthly spend effect comparison data to CSV file.
+
+        Args:
+            solution_id: ID of the solution to extract data from
+            filepath: Optional path to save the CSV file. If None, saves to current directory
+
+        Returns:
+            Optional[str]: Path to the saved CSV file, or None if failed
+        """
+        logger.debug("Starting generation of monthly spend effect CSV dump")
+
+        try:
+            # Check if solution_id exists in the data
+            if solution_id not in self.pareto_result.plot_data_collect:
+                logger.warning(
+                    f"Invalid solution ID: {solution_id}. Solution not found in available data."
+                )
+                return None
+
+            # Get decomposition data for effects
+            x_decomp_vec = self.pareto_result.x_decomp_vec_collect[
+                self.pareto_result.x_decomp_vec_collect["sol_id"] == solution_id
+            ].copy()
+
+            if x_decomp_vec.empty:
+                logger.warning(
+                    f"No decomposition data found for solution {solution_id}"
+                )
+                return None
+
+            # Convert 'ds' to datetime and extract month
+            x_decomp_vec.loc[:, "ds"] = pd.to_datetime(x_decomp_vec["ds"])
+            x_decomp_vec.loc[:, "month"] = x_decomp_vec["ds"].dt.to_period("M")
+
+            # Get spend data
+            media_vec_collect = self.pareto_result.media_vec_collect[
+                (self.pareto_result.media_vec_collect["sol_id"] == solution_id)
+                & (self.pareto_result.media_vec_collect["type"] == "rawSpend")
+            ].copy()
+
+            # If spend data has dates, add month column
+            if "ds" in media_vec_collect.columns and not media_vec_collect.empty:
+                media_vec_collect.loc[:, "ds"] = pd.to_datetime(media_vec_collect["ds"])
+                media_vec_collect.loc[:, "month"] = media_vec_collect[
+                    "ds"
+                ].dt.to_period("M")
+
+            # Get channel names
+            paid_media_spends = self.mmm_data.mmmdata_spec.paid_media_spends
+
+            # Determine metric type
+            metric_type = (
+                "ROAS"
+                if self.mmm_data.mmmdata_spec.dep_var_type == DependentVarType.REVENUE
+                else "CPA"
+            )
+
+            # Prepare CSV data
+            csv_data = []
+
+            # Get unique months from decomposition data
+            months = sorted(x_decomp_vec["month"].unique())
+
+            for month in months:
+                month_str = str(month)
+
+                # Filter data for this month
+                month_decomp = x_decomp_vec[x_decomp_vec["month"] == month]
+
+                # Calculate monthly totals for effects
+                total_monthly_effect = 0
+                monthly_effects = {}
+                for channel in paid_media_spends:
+                    if channel in month_decomp.columns:
+                        effect = month_decomp[channel].sum()
+                        monthly_effects[channel] = effect
+                        total_monthly_effect += effect
+
+                # Calculate monthly totals for spend
+                total_monthly_spend = 0
+                monthly_spends = {}
+
+                if not media_vec_collect.empty and "month" in media_vec_collect.columns:
+                    month_spend = media_vec_collect[media_vec_collect["month"] == month]
+                    for channel in paid_media_spends:
+                        if channel in month_spend.columns:
+                            spend = month_spend[channel].sum()
+                            monthly_spends[channel] = spend
+                            total_monthly_spend += spend
+                else:
+                    # Fallback: use overall spend shares proportionally
+                    plot_data = self.pareto_result.plot_data_collect[solution_id]
+                    original_bar_data = plot_data["plot1data"][
+                        "plotMediaShareLoopBar"
+                    ].copy()
+
+                    # Get total effect for this month as proxy for relative spend
+                    for channel in paid_media_spends:
+                        channel_data = original_bar_data[
+                            original_bar_data["rn"] == channel
+                        ]
+                        if not channel_data.empty:
+                            spend_share = channel_data[
+                                channel_data["variable"] == "spend_share"
+                            ]["value"].iloc[0]
+                            # Estimate spend based on spend share and monthly effect proportion
+                            estimated_spend = spend_share * total_monthly_effect
+                            monthly_spends[channel] = estimated_spend
+                            total_monthly_spend += estimated_spend
+
+                # Create CSV rows for each channel
+                for channel in paid_media_spends:
+                    effect = monthly_effects.get(channel, 0)
+                    spend = monthly_spends.get(channel, 0)
+
+                    # Calculate shares
+                    effect_share = (
+                        effect / total_monthly_effect if total_monthly_effect > 0 else 0
+                    )
+                    spend_share = (
+                        spend / total_monthly_spend if total_monthly_spend > 0 else 0
+                    )
+
+                    # Calculate CPA/ROAS
+                    if metric_type == "ROAS":
+                        cpa_roas = effect / spend if spend > 0 else 0
+                    else:
+                        cpa_roas = spend / effect if effect > 0 else 0
+
+                    csv_data.append(
+                        {
+                            "month": month_str,
+                            "spend_name": channel,
+                            "effect_share": round(effect_share, 4),
+                            "spend_share": round(spend_share, 4),
+                            "CPA": round(cpa_roas, 4),
+                        }
+                    )
+
+            # Set default filepath if not provided
+            if filepath is None:
+                filepath = f"monthly_spend_effect_comparison_{solution_id}.csv"
+            else:
+                filepath = Path(filepath)
+                if filepath.is_dir():
+                    filepath = (
+                        filepath / f"monthly_spend_effect_comparison_{solution_id}.csv"
+                    )
+
+            # Write to CSV
+            with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
+                fieldnames = [
+                    "month",
+                    "spend_name",
+                    "effect_share",
+                    "spend_share",
+                    "CPA",
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+                writer.writeheader()
+                for row in csv_data:
+                    writer.writerow(row)
+
+            logger.info(f"Successfully saved monthly spend effect CSV to: {filepath}")
+            return str(filepath)
+
+        except Exception as e:
+            logger.error(f"Failed to generate monthly spend effect CSV: {str(e)}")
+            return None
+
     def plot_all(
         self,
         solution_id: str,
@@ -1058,10 +1235,10 @@ class TransformationVisualizer(BaseVisualizer):
         export_location: Union[str, Path] = None,
     ) -> Dict[str, plt.Figure]:
         """
-        Create all allocator plots.
+        Create all allocator plots and generate monthly spend effect CSV.
         Parameters:
             display_plots (bool): Whether to display the plots
-            export_location (Union[str, Path]): Location to export plots
+            export_location (Union[str, Path]): Location to export plots and CSV
             quiet (bool): If True, suppresses logging output
         """
 
@@ -1074,6 +1251,17 @@ class TransformationVisualizer(BaseVisualizer):
                     solution_id
                 ),
             }
+
+            # Generate monthly spend effect CSV
+            csv_export_path = export_location if export_location is not None else None
+            csv_file_path = self.dump_monthly_spend_effect_csv(
+                solution_id=solution_id, filepath=csv_export_path
+            )
+
+            if csv_file_path:
+                logger.info(f"Monthly spend effect CSV saved to: {csv_file_path}")
+            else:
+                logger.warning("Failed to generate monthly spend effect CSV")
 
             if display_plots:
                 self.display_plots(plots)
