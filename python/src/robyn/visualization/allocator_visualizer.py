@@ -1162,7 +1162,11 @@ class AllocatorVisualizer(BaseVisualizer):
 
                 # Calculate response curve to find saturation point
                 # Create a fine grid of spend values
-                max_spend = current_spend * 100  # Look far ahead
+                if current_spend == 0:
+                    max_spend = 100_000_000  # Use a large default value
+                else:
+                    max_spend = current_spend * 100  # Look far ahead
+
                 spend_grid = np.linspace(0, max_spend, 10000)
 
                 # Get parameters for this channel
