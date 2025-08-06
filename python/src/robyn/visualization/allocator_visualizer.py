@@ -1031,7 +1031,7 @@ class AllocatorVisualizer(BaseVisualizer):
         export_location: Union[str, Path] = None,
         quiet: bool = True,
         calculate_saturation: bool = True,
-        saturation_method: str = "response_based",
+        saturation_method: str = "marginal_based",
         saturation_percentage: float = 0.8,
         marginal_threshold: float = 0.1,
     ) -> Dict[str, plt.Figure]:
@@ -1129,7 +1129,7 @@ class AllocatorVisualizer(BaseVisualizer):
             export_path: Path to save the CSV file (optional)
 
         Returns:
-            DataFrame with columns: year_month, spend_name, current_spend, saturation_point
+            DataFrame with columns: week_start_date, spend_name, current_spend, saturation_point
         """
         try:
             logger.info("Calculating saturation points for all channels")
@@ -1138,16 +1138,15 @@ class AllocatorVisualizer(BaseVisualizer):
             date_min = self.dt_optim_out["date_min"].iloc[0]
             date_max = self.dt_optim_out["date_max"].iloc[0]
 
-            # Extract year_month from the date range
-            # Using the middle of the date range as representative
-            if (
-                pd.to_datetime(date_min).year == pd.to_datetime(date_max).year
-                and pd.to_datetime(date_min).month == pd.to_datetime(date_max).month
-            ):
-                year_month = pd.to_datetime(date_min).strftime("%Y-%m")
-            else:
-                # If date range spans multiple months, use the end date
-                year_month = pd.to_datetime(date_max).strftime("%Y-%m")
+            # Convert to datetime and calculate week starting on Monday
+            date_min_dt = pd.to_datetime(date_min)
+            date_max_dt = pd.to_datetime(date_max)
+
+            # Find the Monday of the week containing date_max (ISO week standard)
+            # weekday() returns 0 for Monday, 6 for Sunday
+            days_to_monday = date_max_dt.weekday()
+            week_start_date = date_max_dt - pd.Timedelta(days=days_to_monday)
+            week_start_str = week_start_date.strftime("%Y-%m-%d")
 
             saturation_data = []
 
@@ -1162,10 +1161,7 @@ class AllocatorVisualizer(BaseVisualizer):
 
                 # Calculate response curve to find saturation point
                 # Create a fine grid of spend values
-                if current_spend == 0:
-                    max_spend = 100_000_000  # Use a large default value
-                else:
-                    max_spend = current_spend * 100  # Look far ahead
+                max_spend = current_spend * 100  # Look far ahead
 
                 spend_grid = np.linspace(0, max_spend, 10000)
 
@@ -1191,7 +1187,14 @@ class AllocatorVisualizer(BaseVisualizer):
                         theta=theta,
                         get_sum=False,
                     )
-                    responses.append(response)
+                    # Ensure we get a scalar value
+                    if hasattr(response, "__len__") and len(response) > 0:
+                        response = (
+                            response[0] if len(response) == 1 else np.sum(response)
+                        )
+                    elif hasattr(response, "__len__") and len(response) == 0:
+                        response = 0.0
+                    responses.append(float(response))
 
                 responses = np.array(responses)
 
@@ -1252,7 +1255,7 @@ class AllocatorVisualizer(BaseVisualizer):
 
                 saturation_data.append(
                     {
-                        "year_month": year_month,
+                        "week_start_date": week_start_str,
                         "spend_name": channel,
                         "current_spend": current_spend,
                         "saturation_point": saturation_spend,
