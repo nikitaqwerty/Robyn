@@ -1,28 +1,29 @@
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Any, Union
-import numpy as np
-import pandas as pd
 import json
 import logging
-from .entities.allocation_params import AllocatorParams
-from .entities.allocation_result import AllocationResult, OptimOutData, MainPoints
-from .entities.optimization_result import OptimizationResult
-from .entities.constraints import Constraints
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
+import numpy as np
+import pandas as pd
+from robyn.data.entities.hyperparameters import Hyperparameters
+from robyn.data.entities.mmmdata import MMMData
+from robyn.data.validation.mmmdata_utils import MMMDataUtils
+from robyn.modeling.entities.pareto_result import ParetoResult
+from robyn.modeling.feature_engineering import FeaturizedMMMData
+
 from .constants import (
+    ALGO_MMA_AUGLAG,
+    ALGO_SLSQP_AUGLAG,
     SCENARIO_MAX_RESPONSE,
     SCENARIO_TARGET_EFFICIENCY,
-    ALGO_SLSQP_AUGLAG,
-    ALGO_MMA_AUGLAG,
 )
-from datetime import datetime
+from .entities.allocation_params import AllocatorParams
+from .entities.allocation_result import AllocationResult, MainPoints, OptimOutData
+from .entities.constraints import Constraints
+from .entities.optimization_result import OptimizationResult
+from .optimizer import eval_f, eval_g_eq, eval_g_ineq, run_optimization
 from .response import calculate_response, which_usecase
-from robyn.data.validation.mmmdata_utils import MMMDataUtils
-
-from robyn.data.entities.mmmdata import MMMData
-from robyn.modeling.feature_engineering import FeaturizedMMMData
-from robyn.data.entities.hyperparameters import Hyperparameters
-from robyn.modeling.entities.pareto_result import ParetoResult
-from .optimizer import run_optimization, eval_f, eval_g_eq, eval_g_ineq
 
 
 class BudgetAllocator:
@@ -684,7 +685,9 @@ class BudgetAllocator:
                     high_roi_idx = 0
 
                 # Allocate remaining budget to the target channel (up to its upper bound)
-                available_headroom = self.ub.iloc[high_roi_idx] - self.x0.iloc[high_roi_idx]
+                available_headroom = (
+                    self.ub.iloc[high_roi_idx] - self.x0.iloc[high_roi_idx]
+                )
                 allocation = min(remaining_budget, available_headroom)
                 self.x0.iloc[high_roi_idx] += allocation
 
@@ -930,10 +933,12 @@ class BudgetAllocator:
             }
         )
         lower_bounds = {
-            channel: self.lb.iloc[i] for i, channel in enumerate(self.channel_for_allocation)
+            channel: self.lb.iloc[i]
+            for i, channel in enumerate(self.channel_for_allocation)
         }
         upper_bounds = {
-            channel: self.ub.iloc[i] for i, channel in enumerate(self.channel_for_allocation)
+            channel: self.ub.iloc[i]
+            for i, channel in enumerate(self.channel_for_allocation)
         }
         total_budget = self.total_budget_unit
         x_hist_carryover = {k: np.mean(v) for k, v in self.hist_carryover_eval.items()}
@@ -1335,11 +1340,12 @@ class BudgetAllocator:
             dt_optim_out_scurve.loc[mask_carryover, "spend"] = carryover_mean
 
             # Generate simulation points
-            max_x = (
+            max_x = max(
                 dt_optim_out_scurve[dt_optim_out_scurve["channels"] == channel][
                     "spend"
                 ].max()
-                * 10
+                * 10,
+                25_000_000,
             )
             simulate_spend = np.linspace(0, max_x, 500)
 

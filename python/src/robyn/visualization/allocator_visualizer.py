@@ -1033,7 +1033,7 @@ class AllocatorVisualizer(BaseVisualizer):
         calculate_saturation: bool = True,
         saturation_method: str = "marginal_based",
         saturation_percentage: float = 0.8,
-        marginal_threshold: float = 0.1,
+        marginal_threshold: float = 0.3,
     ) -> Dict[str, plt.Figure]:
         """
         Create all allocator plots.
@@ -1159,9 +1159,19 @@ class AllocatorVisualizer(BaseVisualizer):
                     self.dt_optim_out["channels"] == channel, "initSpendUnit"
                 ].iloc[0]
 
+                # Get max spend from plot_dt_scurve for this channel
+                plot_dt_scurve = self.eval_list["plotDT_scurve"]
+                channel_scurve_data = plot_dt_scurve[
+                    plot_dt_scurve["channel"] == channel
+                ]
+                if not channel_scurve_data.empty:
+                    max_spend = channel_scurve_data["spend"].max()
+                else:
+                    # Fallback to original logic if no scurve data available
+                    max_spend = current_spend * 100
+
                 # Calculate response curve to find saturation point
                 # Create a fine grid of spend values
-                max_spend = current_spend * 100  # Look far ahead
 
                 spend_grid = np.linspace(0, max_spend, 10000)
 
@@ -1223,30 +1233,41 @@ class AllocatorVisualizer(BaseVisualizer):
                     # Calculate marginal returns (derivative approximation)
                     marginal_returns = np.diff(responses) / np.diff(spend_grid)
 
-                    # Get initial marginal return (at current spend level)
-                    current_idx = np.argmin(np.abs(spend_grid - current_spend))
-                    if current_idx >= len(marginal_returns):
-                        current_idx = len(marginal_returns) - 1
-                    initial_marginal = (
-                        marginal_returns[current_idx]
-                        if current_idx < len(marginal_returns)
-                        else marginal_returns[0]
-                    )
+                    # Find the maximum marginal return to handle S-shaped curves properly
+                    max_marginal_idx = np.argmax(marginal_returns)
+                    max_marginal_return = marginal_returns[max_marginal_idx]
 
-                    # Find where marginal return drops below threshold
-                    threshold_return = initial_marginal * marginal_threshold
-                    below_threshold = np.where(marginal_returns < threshold_return)[0]
+                    # For S-shaped curves, we want to find saturation after the peak
+                    # So we only consider the declining part of the marginal curve
+                    # This avoids incorrectly identifying the initial flat part as saturation
 
-                    if len(below_threshold) > 0:
+                    # Find where marginal return drops below threshold of the maximum
+                    # Using the maximum instead of initial ensures we capture the true saturation
+                    threshold_return = max_marginal_return * marginal_threshold
+
+                    # Only look for saturation after the peak marginal return
+                    marginal_after_peak = marginal_returns[max_marginal_idx:]
+                    below_threshold_after_peak = np.where(
+                        marginal_after_peak < threshold_return
+                    )[0]
+
+                    if len(below_threshold_after_peak) > 0:
+                        # Adjust index to account for offset from starting after peak
+                        saturation_idx = (
+                            max_marginal_idx + below_threshold_after_peak[0]
+                        )
                         # Use the midpoint of the interval where threshold is crossed
-                        saturation_idx = below_threshold[0]
                         saturation_spend = (
                             spend_grid[saturation_idx] + spend_grid[saturation_idx + 1]
                         ) / 2
                     else:
-                        saturation_spend = max_spend
+                        # If marginal return never drops below threshold after peak,
+                        # look for a reasonable saturation point based on diminishing returns
+                        # Use 90% of max spend as a fallback
+                        saturation_spend = max_spend * 0.9
                         logger.warning(
-                            f"Channel {channel} marginal return never drops below {marginal_threshold*100}% threshold"
+                            f"Channel {channel} marginal return never drops below {marginal_threshold*100}% "
+                            f"of peak marginal return. Using 90% of max spend as saturation point."
                         )
                 else:
                     raise ValueError(
