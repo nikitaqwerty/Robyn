@@ -655,6 +655,35 @@ class AllocatorVisualizer(BaseVisualizer):
                 col=col,
             )
 
+            # Add saturation point marker if available
+            if hasattr(self, "saturation_df") and self.saturation_df is not None:
+                sat_row = self.saturation_df[
+                    self.saturation_df["spend_name"] == channel_name
+                ]
+                if not sat_row.empty:
+                    saturation_spend = sat_row["saturation_point"].values[0]
+                    if saturation_spend <= right_limit:
+                        # Approximate response via interpolation
+                        sat_response = float(
+                            np.interp(
+                                saturation_spend,
+                                channel_data["spend"],
+                                channel_data["total_response"],
+                            )
+                        )
+                        fig.add_trace(
+                            go.Scatter(
+                                x=[saturation_spend],
+                                y=[sat_response],
+                                mode="markers",
+                                marker=dict(color="black", size=6, symbol="x"),
+                                name=f"{channel_name} saturation",
+                                showlegend=False,
+                            ),
+                            row=row,
+                            col=col,
+                        )
+
             # Update x-axis range
             fig.update_xaxes(range=[0, right_limit], row=row, col=col)
 
@@ -875,6 +904,32 @@ class AllocatorVisualizer(BaseVisualizer):
                     )
                 )
 
+                # Add saturation point marker if available
+                if hasattr(self, "saturation_df") and self.saturation_df is not None:
+                    sat_row = self.saturation_df[
+                        self.saturation_df["spend_name"] == channel
+                    ]
+                    if not sat_row.empty:
+                        saturation_spend = sat_row["saturation_point"].values[0]
+                        if saturation_spend <= max_projection_spend:
+                            sat_response = float(
+                                np.interp(
+                                    saturation_spend,
+                                    channel_data["spend"],
+                                    channel_data["total_response"],
+                                )
+                            )
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=[saturation_spend],
+                                    y=[sat_response],
+                                    mode="markers",
+                                    marker=dict(color="black", size=8, symbol="x"),
+                                    name=f"{channel} saturation",
+                                    showlegend=False,
+                                )
+                            )
+
             # Add information section header to legend (dummy trace)
             fig.add_trace(
                 go.Scatter(
@@ -975,6 +1030,10 @@ class AllocatorVisualizer(BaseVisualizer):
         display_plots: bool = True,
         export_location: Union[str, Path] = None,
         quiet: bool = True,
+        calculate_saturation: bool = True,
+        saturation_method: str = "response_based",
+        saturation_percentage: float = 0.8,
+        marginal_threshold: float = 0.1,
     ) -> Dict[str, plt.Figure]:
         """
         Create all allocator plots.
@@ -985,6 +1044,8 @@ class AllocatorVisualizer(BaseVisualizer):
         """
 
         try:
+            # Initialize saturation data attribute
+            self.saturation_df = None
             # Calculate saturation points if requested
             if calculate_saturation:
                 saturation_export_path = None
@@ -1005,7 +1066,7 @@ class AllocatorVisualizer(BaseVisualizer):
                         f"Calculating saturation points using {saturation_method} method"
                     )
 
-                self.calculate_saturation_points(
+                self.saturation_df = self.calculate_saturation_points(
                     saturation_percentage=saturation_percentage,
                     method=saturation_method,
                     marginal_threshold=marginal_threshold,
