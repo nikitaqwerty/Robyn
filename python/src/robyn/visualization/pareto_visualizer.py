@@ -1536,6 +1536,8 @@ class ParetoVisualizer(BaseVisualizer):
     def create_pareto_front_plot(self, is_calibrated):
         """Create Pareto Front Plot."""
         unfiltered_pareto_results = self.unfiltered_pareto_result
+        if unfiltered_pareto_results is None:
+            return None
         # Only copy if modifications are needed (is_calibrated=True) to prevent side effects
         if is_calibrated:
             result_hyp_param = unfiltered_pareto_results.result_hyp_param.copy()
@@ -1595,6 +1597,8 @@ class ParetoVisualizer(BaseVisualizer):
     def create_ridgeline_model_convergence(self):
         """Create Ridgeline Model Convergence Plots."""
         all_plots = {}
+        if self.unfiltered_pareto_result is None:
+            return None
         x_decomp_agg = self.unfiltered_pareto_result.x_decomp_agg
         paid_media_spends = self.mmm_data.mmmdata_spec.paid_media_spends
         dt_ridges = x_decomp_agg[
