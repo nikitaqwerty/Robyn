@@ -1345,7 +1345,7 @@ class BudgetAllocator:
                     "spend"
                 ].max()
                 * 10,
-                25_000_000,
+                50_000_000,
             )
             simulate_spend = np.linspace(0, max_x, 500)
 

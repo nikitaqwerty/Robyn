@@ -1055,16 +1055,20 @@ class TransformationVisualizer(BaseVisualizer):
         self,
         solution_id: str,
         filepath: Union[str, Path] = None,
-    ) -> Optional[str]:
+        export_raw_x_decomp: bool = True,
+    ) -> Optional[Dict[str, str]]:
         """
         Dump monthly spend effect comparison data to CSV file.
 
         Args:
             solution_id: ID of the solution to extract data from
             filepath: Optional path to save the CSV file. If None, saves to current directory
+            export_raw_x_decomp: Whether to also export raw x_decomp_vec data to separate CSV
 
         Returns:
-            Optional[str]: Path to the saved CSV file, or None if failed
+            Optional[Dict[str, str]]: Dict with paths to saved CSV files, or None if failed
+                - 'monthly_summary': Path to monthly aggregated summary CSV
+                - 'raw_x_decomp': Path to raw x_decomp_vec CSV (if export_raw_x_decomp=True)
         """
         logger.debug("Starting generation of monthly spend effect CSV dump")
 
@@ -1197,17 +1201,27 @@ class TransformationVisualizer(BaseVisualizer):
                     )
 
             # Set default filepath if not provided
+            result_paths = {}
+
             if filepath is None:
-                filepath = f"monthly_spend_effect_comparison_{solution_id}.csv"
+                summary_filepath = f"monthly_spend_effect_comparison_{solution_id}.csv"
+                raw_filepath = f"raw_x_decomp_vec_{solution_id}.csv"
             else:
                 filepath = Path(filepath)
                 if filepath.is_dir():
-                    filepath = (
+                    summary_filepath = (
                         filepath / f"monthly_spend_effect_comparison_{solution_id}.csv"
                     )
+                    raw_filepath = filepath / f"raw_x_decomp_vec_{solution_id}.csv"
+                else:
+                    # filepath is a file - use its directory and stem for naming
+                    base_name = filepath.stem
+                    directory = filepath.parent
+                    summary_filepath = directory / f"{base_name}_monthly_summary.csv"
+                    raw_filepath = directory / f"{base_name}_raw_x_decomp.csv"
 
-            # Write to CSV
-            with open(filepath, "w", newline="", encoding="utf-8") as csvfile:
+            # Write monthly summary CSV
+            with open(summary_filepath, "w", newline="", encoding="utf-8") as csvfile:
                 fieldnames = [
                     "month",
                     "spend_name",
@@ -1221,8 +1235,23 @@ class TransformationVisualizer(BaseVisualizer):
                 for row in csv_data:
                     writer.writerow(row)
 
-            logger.info(f"Successfully saved monthly spend effect CSV to: {filepath}")
-            return str(filepath)
+            logger.info(
+                f"Successfully saved monthly spend effect CSV to: {summary_filepath}"
+            )
+            result_paths["monthly_summary"] = str(summary_filepath)
+
+            # Export raw x_decomp_vec data if requested
+            if export_raw_x_decomp:
+                try:
+                    x_decomp_vec.to_csv(raw_filepath, index=False)
+                    logger.info(
+                        f"Successfully saved raw x_decomp_vec CSV to: {raw_filepath}"
+                    )
+                    result_paths["raw_x_decomp"] = str(raw_filepath)
+                except Exception as e:
+                    logger.warning(f"Failed to save raw x_decomp_vec CSV: {str(e)}")
+
+            return result_paths
 
         except Exception as e:
             logger.error(f"Failed to generate monthly spend effect CSV: {str(e)}")
@@ -1254,12 +1283,15 @@ class TransformationVisualizer(BaseVisualizer):
 
             # Generate monthly spend effect CSV
             csv_export_path = export_location if export_location is not None else None
-            csv_file_path = self.dump_monthly_spend_effect_csv(
+            csv_file_paths = self.dump_monthly_spend_effect_csv(
                 solution_id=solution_id, filepath=csv_export_path
             )
 
-            if csv_file_path:
-                logger.info(f"Monthly spend effect CSV saved to: {csv_file_path}")
+            if csv_file_paths:
+                for file_type, file_path in csv_file_paths.items():
+                    logger.info(
+                        f"{file_type.replace('_', ' ').title()} CSV saved to: {file_path}"
+                    )
             else:
                 logger.warning("Failed to generate monthly spend effect CSV")
 
