@@ -59,6 +59,10 @@ class ModelExecutor(BaseModelExecutor):
         observation_weights: Optional[
             np.ndarray
         ] = None,  # New parameter for observation weights
+        coefficient_lower_limits: Optional[Dict[str, float]] = None,
+        coefficient_upper_limits: Optional[Dict[str, float]] = None,
+        intercept_lower_limit: Optional[float] = None,
+        intercept_upper_limit: Optional[float] = None,
     ) -> ModelOutputs:
         """
         Execute the Robyn model run with specified parameters.
@@ -73,6 +77,12 @@ class ModelExecutor(BaseModelExecutor):
                                Default is 'nrmse_train'.
             observation_weights: Optional array of observation weights for weighted regression.
                                Should have the same length as the number of observations.
+            coefficient_lower_limits: Optional dict mapping feature names to custom lower bounds.
+                                       These will update (tighten) bounds derived from `_setup_sign_control()`.
+            coefficient_upper_limits: Optional dict mapping feature names to custom upper bounds.
+                                       These will update (tighten) bounds derived from `_setup_sign_control()`.
+            intercept_lower_limit: Optional lower bound for intercept. Combined with `intercept_sign` constraint.
+            intercept_upper_limit: Optional upper bound for intercept. Combined with `intercept_sign` constraint.
         """
         self.logger.info("Starting model execution with model_name=%s", model_name)
         self.logger.debug(
@@ -149,6 +159,10 @@ class ModelExecutor(BaseModelExecutor):
                     cv_train_size=cv_train_size,
                     hp_opt_score_target=hp_opt_score_target,
                     observation_weights=observation_weights,
+                    coefficient_lower_limits=coefficient_lower_limits,
+                    coefficient_upper_limits=coefficient_upper_limits,
+                    intercept_lower_limit=intercept_lower_limit,
+                    intercept_upper_limit=intercept_upper_limit,
                 )
                 self.logger.info("Model building completed successfully")
 

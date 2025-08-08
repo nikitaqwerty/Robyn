@@ -62,6 +62,10 @@ class RidgeModelEvaluator:
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
         observation_weights: Optional[np.ndarray] = None,
+        coefficient_lower_limits: Optional[Dict[str, float]] = None,
+        coefficient_upper_limits: Optional[Dict[str, float]] = None,
+        intercept_lower_limit: Optional[float] = None,
+        intercept_upper_limit: Optional[float] = None,
     ) -> Trial:
         """Run Nevergrad optimization for ridge regression."""
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -165,6 +169,10 @@ class RidgeModelEvaluator:
                         cv_train_size=cv_train_size,
                         hp_opt_score_target=hp_opt_score_target,
                         observation_weights=observation_weights,
+                        coefficient_lower_limits=coefficient_lower_limits,
+                        coefficient_upper_limits=coefficient_upper_limits,
+                        intercept_lower_limit=intercept_lower_limit,
+                        intercept_upper_limit=intercept_upper_limit,
                     )
 
                 self.logger.debug(
@@ -329,6 +337,10 @@ class RidgeModelEvaluator:
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
         observation_weights: Optional[np.ndarray] = None,
+        coefficient_lower_limits: Optional[Dict[str, float]] = None,
+        coefficient_upper_limits: Optional[Dict[str, float]] = None,
+        intercept_lower_limit: Optional[float] = None,
+        intercept_upper_limit: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Evaluate model with parameter set
         Args:
@@ -504,6 +516,37 @@ class RidgeModelEvaluator:
         signs_grouped, lower_limits, upper_limits, check_factor = (
             self._setup_sign_control(X)
         )
+
+        # Apply user-provided coefficient limits by updating (not overwriting)
+        # existing limits from sign control. Align by X.columns order.
+        if coefficient_lower_limits is not None or coefficient_upper_limits is not None:
+            lower_arr = list(lower_limits)
+            upper_arr = list(upper_limits)
+            for idx, col in enumerate(X.columns):
+                if (
+                    coefficient_lower_limits is not None
+                    and col in coefficient_lower_limits
+                ):
+                    try:
+                        user_low = float(coefficient_lower_limits[col])
+                        # tighten lower bound: max(existing, user)
+                        base_low = lower_arr[idx]
+                        lower_arr[idx] = max(base_low, user_low)
+                    except Exception:
+                        pass
+                if (
+                    coefficient_upper_limits is not None
+                    and col in coefficient_upper_limits
+                ):
+                    try:
+                        user_up = float(coefficient_upper_limits[col])
+                        # tighten upper bound: min(existing, user)
+                        base_up = upper_arr[idx]
+                        upper_arr[idx] = min(base_up, user_up)
+                    except Exception:
+                        pass
+            lower_limits = lower_arr
+            upper_limits = upper_arr
         params["lower_limits"] = lower_limits
         params["upper_limits"] = upper_limits
 
@@ -650,6 +693,15 @@ class RidgeModelEvaluator:
         )
 
         model.fit(x_norm, y_norm)
+
+        # Intercept bound soft enforcement: if intercept bounds provided and violated,
+        # add a large penalty to loss later. We'll store flags for later use.
+        intercept_violation_penalty = 0.0
+        if (
+            intercept_lower_limit is not None or intercept_upper_limit is not None
+        ) and model is not None:
+            # model.intercept_ will be available after fit
+            pass  # evaluated after fit
 
         # Calculate metrics using R-style calculations
         y_train_pred = model.predict(x_norm)
@@ -1160,7 +1212,7 @@ class RidgeModelEvaluator:
             }
         )
 
-        # Calculate loss
+        # Calculate base loss
         loss = (
             objective_weights[0] * metrics["nrmse"]
             + objective_weights[1] * metrics["decomp_rssd"]
@@ -1170,6 +1222,22 @@ class RidgeModelEvaluator:
                 else 0
             )
         )
+
+        # After base loss computed, apply intercept bound penalty if violated
+        if intercept_lower_limit is not None or intercept_upper_limit is not None:
+            intercept_value = float(getattr(model, "intercept_", 0.0))
+            violated = False
+            if intercept_lower_limit is not None and intercept_value < float(
+                intercept_lower_limit
+            ):
+                violated = True
+            if intercept_upper_limit is not None and intercept_value > float(
+                intercept_upper_limit
+            ):
+                violated = True
+            if violated:
+                # Large penalty to effectively discard this candidate
+                loss = loss + 1e6
         # Get paid media rows from x_decomp_agg
         paid_media_mask = x_decomp_agg["rn"].isin(
             self.mmm_data.mmmdata_spec.paid_media_spends

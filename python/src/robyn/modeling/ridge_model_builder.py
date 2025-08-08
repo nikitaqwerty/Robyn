@@ -165,6 +165,10 @@ class RidgeModelBuilder:
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
         observation_weights: Optional[np.ndarray] = None,
+        coefficient_lower_limits: Optional[Dict[str, float]] = None,
+        coefficient_upper_limits: Optional[Dict[str, float]] = None,
+        intercept_lower_limit: Optional[float] = None,
+        intercept_upper_limit: Optional[float] = None,
     ) -> ModelOutputs:
         start_time = time.time()
 
@@ -228,6 +232,10 @@ class RidgeModelBuilder:
                 cv_train_size=cv_train_size,
                 hp_opt_score_target=hp_opt_score_target,
                 observation_weights=observation_weights,
+                coefficient_lower_limits=coefficient_lower_limits,
+                coefficient_upper_limits=coefficient_upper_limits,
+                intercept_lower_limit=intercept_lower_limit,
+                intercept_upper_limit=intercept_upper_limit,
             )
             trials.append(trial_result)
         # Calculate convergence
