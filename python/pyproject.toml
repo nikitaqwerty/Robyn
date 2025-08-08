@@ -33,7 +33,7 @@ dependencies = [
     "pytest",
     "plotly",
     "ipykernel",
-    "rpy2==3.5.16",
+    "python-glmnet==2.6.1",
     "kaleido==0.2.1",
     "nlopt==2.9.1",
     "nbformat==5.10.4",
