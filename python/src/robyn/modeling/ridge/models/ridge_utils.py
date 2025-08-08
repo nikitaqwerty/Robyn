@@ -1,11 +1,13 @@
 import logging
+from typing import Any, List, Optional
+
 import numpy as np
 
-from scipy.optimize import minimize
-from sklearn.preprocessing import StandardScaler  # Assuming this is allowed
-
-# n_samples is part of the original API, kept for consistency, though not directly used in fitting logic.
-# intercept parameter from original API seems unused/superceded by fit_intercept, so omitted from Python version's direct use.
+try:
+    # python-glmnet package
+    from glmnet.linear import ElasticNet as GlmnetElasticNet
+except Exception:  # pragma: no cover - optional dependency resolved at runtime
+    GlmnetElasticNet = None
 
 
 def create_ridge_model_python(
@@ -20,326 +22,263 @@ def create_ridge_model_python(
     penalty_factor=None,
     fixed_coefficients=None,
     fixed_intercept=None,
+    weights=None,
 ):
-    """Create a Python-native Ridge regression model with constraints."""
+    """Create a Python-native Ridge regression model with constraints using python-glmnet.
 
-    class PythonRidgeWrapper:
+    Mirrors the interface and behavior of create_ridge_model_rpy2().
+    """
+    if GlmnetElasticNet is None:
+        raise ImportError(
+            "python-glmnet is required for the Python implementation. Please install python-glmnet."
+        )
+
+    class GlmnetRidgePythonWrapper:
         def __init__(self):
-            self.lambda_value = lambda_value
-            self.fit_intercept_param = fit_intercept
-            self.standardize = standardize
-            self.intercept_sign = intercept_sign
-
-            self.coef_ = None
-            self.intercept_ = 0.0
+            self.lambda_value: float = float(lambda_value)
+            self.fit_intercept: bool = bool(fit_intercept and intercept)
+            self.standardize: bool = bool(standardize)
+            self.intercept_sign: str = (
+                str(intercept_sign) if intercept_sign is not None else "default"
+            )
+            self.fitted_model: Optional[Any] = None
+            self.coef_: Optional[np.ndarray] = None
+            self.intercept_: float = 0.0
             self.logger = logging.getLogger(__name__)
-            # _prediction_cache can be implemented if strictly needed, but direct computation is often fast.
-            # For this version, predict will compute directly.
+            self.full_coef_: Optional[np.ndarray] = None
+            self.df_int: int = 1  # default assumes intercept included
+            self.fixed_coefficients: Optional[List[Optional[float]]] = (
+                list(fixed_coefficients) if fixed_coefficients is not None else None
+            )
+            self.fixed_intercept: Optional[float] = (
+                float(fixed_intercept) if fixed_intercept is not None else None
+            )
 
-            self.full_coef_ = None
-            self.df_int = 0
+            # Persist original constraints/penalties; will be subset as needed
+            self._lower_limits_orig = lower_limits
+            self._upper_limits_orig = upper_limits
+            self._penalty_factor_orig = penalty_factor
 
-            self.fixed_coefficients_param = fixed_coefficients
-            self.fixed_intercept_param = fixed_intercept
+        def _build_estimator(self, lower_limits_arr, upper_limits_arr, lambda_path_arr):
+            # Disable CV; we'll extract coefficients for our provided lambda directly
+            est = GlmnetElasticNet(
+                alpha=0.0,
+                n_lambda=len(lambda_path_arr),
+                lambda_path=lambda_path_arr,
+                min_lambda_ratio=1.0 if len(lambda_path_arr) == 1 else 1e-4,
+                standardize=self.standardize,
+                fit_intercept=self.fit_intercept,
+                lower_limits=(
+                    lower_limits_arr if lower_limits_arr is not None else -np.inf
+                ),
+                upper_limits=(
+                    upper_limits_arr if upper_limits_arr is not None else np.inf
+                ),
+                n_splits=0,
+            )
+            return est
 
-            self.X_scaler_ = None
-            self.penalty_factor_param = penalty_factor
-            self.lower_limits_param = lower_limits
-            self.upper_limits_param = upper_limits
+        def _subset_constraints(self, indices):
+            def sub_or_none(arr):
+                if arr is None:
+                    return None
+                arr = np.asarray(arr)
+                return arr[indices]
 
-        def _objective_function(
-            self,
-            params_to_optimize,
-            X_data,
-            y_target,
-            current_lambda,
-            current_penalty_factors_subset,
-            fitting_intercept_in_params_list,
-        ):
+            lower = sub_or_none(self._lower_limits_orig)
+            upper = sub_or_none(self._upper_limits_orig)
+            penalty = sub_or_none(self._penalty_factor_orig)
+            return lower, upper, penalty
 
-            current_intercept_for_loss = 0.0
-            coeffs_for_loss = params_to_optimize
+        def _extract_solution(self, est, lambda_value_use):
+            # Use internal interpolation helper to get coef/intercept at lambda
+            # We avoid calling est.predict with lamb=None (would require lambda_best_)
+            lambda_path = est.lambda_path_
+            coef_path = est.coef_path_
+            intercept_path = est.intercept_path_
 
-            if fitting_intercept_in_params_list:
-                current_intercept_for_loss = params_to_optimize[0]
-                coeffs_for_loss = params_to_optimize[1:]
-
-            predictions = X_data @ coeffs_for_loss + current_intercept_for_loss
-            mse = 0.5 * np.sum((y_target - predictions) ** 2)
-
-            l2_penalty = 0.0
+            # When single lambda, coef_path is already the target. Otherwise interpolate
             if (
-                coeffs_for_loss.size > 0 and current_lambda > 0
-            ):  # No penalty if no coeffs or lambda is 0
-                pen_factors_to_apply = current_penalty_factors_subset
-                if pen_factors_to_apply is None:
-                    pen_factors_to_apply = np.ones_like(coeffs_for_loss)
-                # Ensure it's a NumPy array for element-wise multiplication
-                elif not isinstance(pen_factors_to_apply, np.ndarray):
-                    pen_factors_to_apply = np.array(pen_factors_to_apply, dtype=float)
+                lambda_path.shape[0] == 1
+                or np.isclose(lambda_value_use, lambda_path).any()
+            ):
+                # Find nearest index
+                inx = int(np.argmin(np.abs(lambda_path - lambda_value_use)))
+                coef = coef_path[..., inx]
+                intercept = intercept_path[..., inx]
+            else:
+                # Local import to avoid top-level coupling
+                from glmnet.util import _interpolate_model
 
-                l2_penalty = (
-                    0.5
-                    * current_lambda
-                    * np.sum(pen_factors_to_apply * (coeffs_for_loss**2))
+                coef, intercept = _interpolate_model(
+                    lambda_path, coef_path, intercept_path, np.array([lambda_value_use])
                 )
-
-            return mse + l2_penalty
+                # squeeze the last dimension (lambda)
+                coef = np.squeeze(coef, axis=-1)
+                intercept = float(np.squeeze(intercept, axis=-1))
+            # shape fixes
+            if coef.ndim > 1:
+                coef = np.squeeze(coef)
+            intercept = (
+                float(intercept) if not np.isscalar(intercept) else float(intercept)
+            )
+            return coef, intercept
 
         def fit(self, X, y):
-            X_orig = np.asarray(X, dtype=float)
-            y_orig = np.asarray(y, dtype=float)
+            X = np.asarray(X)
+            y = np.asarray(y)
 
-            n_features = X_orig.shape[1]
-            y_adjusted_for_optim = y_orig.copy()
+            # Handle fixed intercept: adjust target and disable intercept in estimator
+            if self.fixed_intercept is not None:
+                y_adjusted = y - self.fixed_intercept
+                self.fit_intercept = False
+                self.intercept_ = float(self.fixed_intercept)
+                self.df_int = 0
+            else:
+                y_adjusted = y
 
-            # --- 1. Determine intercept behavior for optimization ---
-            # actual_fit_intercept_in_optim: does the optimizer solve for an intercept variable?
-            # intercept_offset_for_final_result: base value for final intercept_ (from fixed_intercept_param)
-            actual_fit_intercept_in_optim = self.fit_intercept_param
-            intercept_offset_for_final_result = 0.0
-            self.df_int = 0  # Default df for intercept
-
-            if self.fixed_intercept_param is not None:
-                y_adjusted_for_optim -= self.fixed_intercept_param
-                actual_fit_intercept_in_optim = False
-                intercept_offset_for_final_result = self.fixed_intercept_param
-                # self.df_int remains 0
-
-            # --- 2. Handle fixed coefficients ---
-            fit_cols = list(range(n_features))
+            # Partition columns for fixed coefficients case
             fixed_cols = []
-
-            current_fixed_coeffs = self.fixed_coefficients_param
-            if current_fixed_coeffs is not None:
-                if len(current_fixed_coeffs) != n_features:
+            fit_cols = list(range(X.shape[1]))
+            fixed_values = None
+            if self.fixed_coefficients is not None:
+                if len(self.fixed_coefficients) != X.shape[1]:
                     raise ValueError(
-                        f"Length of fixed_coefficients ({len(current_fixed_coeffs)}) must match number of features ({n_features})"
+                        f"Length of fixed_coefficients ({len(self.fixed_coefficients)}) must match number of features ({X.shape[1]})"
                     )
-                current_fixed_coeffs = np.asarray(current_fixed_coeffs, dtype=float)
-                fixed_mask = ~np.isnan(
-                    current_fixed_coeffs
-                )  # Assuming None/NaN means not fixed
-
-                fixed_cols = [i for i, is_fixed in enumerate(fixed_mask) if is_fixed]
-                fit_cols = [i for i, is_fixed in enumerate(fixed_mask) if not is_fixed]
-
-                if fixed_cols:
-                    fixed_values = current_fixed_coeffs[fixed_cols]
-                    y_adjusted_for_optim -= np.dot(X_orig[:, fixed_cols], fixed_values)
-
-            X_to_fit = X_orig[:, fit_cols]
-
-            # Subset constraints and penalty factors
-            lower_limits_fit = None
-            if self.lower_limits_param is not None and fit_cols:
-                ll_param = np.asarray(self.lower_limits_param, dtype=float)
-                lower_limits_fit = ll_param[fit_cols]
-
-            upper_limits_fit = None
-            if self.upper_limits_param is not None and fit_cols:
-                ul_param = np.asarray(self.upper_limits_param, dtype=float)
-                upper_limits_fit = ul_param[fit_cols]
-
-            penalty_factor_fit_subset = None
-            if self.penalty_factor_param is not None and fit_cols:
-                if isinstance(self.penalty_factor_param, (int, float)):
-                    penalty_factor_fit_subset = np.full(
-                        len(fit_cols), float(self.penalty_factor_param)
+                fixed_cols = [
+                    i for i, c in enumerate(self.fixed_coefficients) if c is not None
+                ]
+                fit_cols = [
+                    i for i, c in enumerate(self.fixed_coefficients) if c is None
+                ]
+                if len(fixed_cols) > 0:
+                    fixed_values = np.array(
+                        [self.fixed_coefficients[i] for i in fixed_cols], dtype=float
                     )
-                elif (
-                    hasattr(self.penalty_factor_param, "__len__")
-                    and len(self.penalty_factor_param) == n_features
-                ):
-                    pf_param = np.asarray(self.penalty_factor_param, dtype=float)
-                    penalty_factor_fit_subset = pf_param[fit_cols]
-                else:
-                    raise ValueError(
-                        f"penalty_factor list/array length ({len(self.penalty_factor_param)}) must match number of features ({n_features}) or be scalar."
-                    )
+                    y_adjusted = y_adjusted - X[:, fixed_cols] @ fixed_values
 
-            # --- Handle cases with no features to fit ---
-            if not fit_cols:
-                self.coef_ = np.zeros(n_features)
-                if n_features > 0 and current_fixed_coeffs is not None:
-                    # Ensure all are numbers, NaNs should have been handled or errored.
-                    # If all fixed, current_fixed_coeffs should not contain NaNs.
-                    self.coef_ = np.nan_to_num(current_fixed_coeffs)
+            # Prepare constraints and penalties for the columns to be fitted
+            if len(fit_cols) < X.shape[1]:
+                lower_limits_fit, upper_limits_fit, penalty_factor_fit = (
+                    self._subset_constraints(np.array(fit_cols, dtype=int))
+                )
+                X_fit = X[:, fit_cols]
+            else:
+                lower_limits_fit = (
+                    np.asarray(self._lower_limits_orig)
+                    if self._lower_limits_orig is not None
+                    else None
+                )
+                upper_limits_fit = (
+                    np.asarray(self._upper_limits_orig)
+                    if self._upper_limits_orig is not None
+                    else None
+                )
+                penalty_factor_fit = (
+                    np.asarray(self._penalty_factor_orig)
+                    if self._penalty_factor_orig is not None
+                    else None
+                )
+                X_fit = X
 
-                self.intercept_ = intercept_offset_for_final_result
-                # If intercept was supposed to be fitted (not fixed) and no coeffs were fit:
-                if self.fit_intercept_param and self.fixed_intercept_param is None:
-                    if y_adjusted_for_optim.size > 0:
-                        potential_intercept = np.mean(y_adjusted_for_optim)
-                        if (
-                            self.intercept_sign == "non_negative"
-                            and potential_intercept < 0
-                        ):
-                            self.intercept_ = (
-                                0.0  # Base is 0 as fixed_intercept_param is None
-                            )
-                            self.df_int = 0
-                        else:
-                            self.intercept_ = potential_intercept
-                            self.df_int = 1
-                    # else: self.intercept_ remains 0 (base is 0), self.df_int = 0
+            # Edge-case: all coefficients fixed, no training needed
+            if len(fit_cols) == 0:
+                self.coef_ = np.array(self.fixed_coefficients, dtype=float)
+                if self.fixed_intercept is None:
+                    self.intercept_ = 0.0
                 self.full_coef_ = np.concatenate([[self.intercept_], self.coef_])
+                self.fitted_model = None
+                # Intercept DOF when not fitting intercept depends on setting
+                self.df_int = 1 if self.fit_intercept else 0
                 return self
 
-            # --- 3. Standardization (of X_to_fit) ---
-            X_for_optim_solver = X_to_fit
-            self.X_scaler_ = None
-            if self.standardize and X_to_fit.shape[0] > 0 and X_to_fit.shape[1] > 0:
-                self.X_scaler_ = StandardScaler(with_mean=True, with_std=True)
-                X_for_optim_solver = self.X_scaler_.fit_transform(X_to_fit)
-
-            # --- 4. Optimization ---
-            num_optim_coeffs = X_for_optim_solver.shape[1]
-            optim_bounds_list = []
-            if num_optim_coeffs > 0:
-                low = (
-                    lower_limits_fit
-                    if lower_limits_fit is not None
-                    else [-np.inf] * num_optim_coeffs
-                )
-                upp = (
-                    upper_limits_fit
-                    if upper_limits_fit is not None
-                    else [np.inf] * num_optim_coeffs
-                )
-                for i in range(num_optim_coeffs):
-                    l_b = low[i] if not np.isneginf(low[i]) else None
-                    u_b = upp[i] if not np.isposinf(upp[i]) else None
-                    optim_bounds_list.append((l_b, u_b))
-
-            # Store df_int based on initial plan to fit intercept
-            if actual_fit_intercept_in_optim:
-                self.df_int = 1
-
-            def run_optimization_routine(
-                fit_interc_in_solver_flag, current_y_target_for_solver
-            ):
-                initial_guess_parts = []
-                current_bounds_for_solver = list(optim_bounds_list)
-
-                if fit_interc_in_solver_flag:
-                    initial_guess_parts.append(0.0)
-                    current_bounds_for_solver.insert(0, (None, None))
-
-                if num_optim_coeffs > 0:
-                    initial_guess_parts.extend([0.0] * num_optim_coeffs)
-
-                initial_guess_for_solver = np.array(initial_guess_parts)
-
-                # Handle case: only intercept, no coeffs (num_optim_coeffs == 0)
-                if fit_interc_in_solver_flag and num_optim_coeffs == 0:
-                    res_interc = (
-                        np.mean(current_y_target_for_solver)
-                        if current_y_target_for_solver.size > 0
-                        else 0.0
-                    )
-                    return res_interc, np.array([])
-
-                if initial_guess_for_solver.size == 0:  # No params to optimize
-                    return 0.0, np.array([])
-
-                opt_result = minimize(
-                    self._objective_function,
-                    initial_guess_for_solver,
-                    args=(
-                        X_for_optim_solver,
-                        current_y_target_for_solver,
-                        self.lambda_value,
-                        penalty_factor_fit_subset,
-                        fit_interc_in_solver_flag,
-                    ),
-                    method="L-BFGS-B",
-                    bounds=current_bounds_for_solver,
-                )
-
-                res_interc_val, res_coeffs_val = 0.0, np.array([])
-                if fit_interc_in_solver_flag:
-                    res_interc_val = opt_result.x[0]
-                    if num_optim_coeffs > 0:
-                        res_coeffs_val = opt_result.x[1:]
-                elif num_optim_coeffs > 0:
-                    res_coeffs_val = opt_result.x
-                return res_interc_val, res_coeffs_val
-
-            # First optimization attempt
-            # `actual_fit_intercept_in_optim` is True if not fixed_intercept and user wants to fit intercept
-            opt_intercept_on_scaled_basis, opt_coeffs_on_scaled_basis = (
-                run_optimization_routine(
-                    actual_fit_intercept_in_optim, y_adjusted_for_optim
-                )
+            # Build estimator and fit
+            est = self._build_estimator(
+                lower_limits_fit,
+                upper_limits_fit,
+                np.array([self.lambda_value], dtype=float),
+            )
+            # Fit with sample weights and relative penalties mapping the R interface
+            sample_weight = None
+            if hasattr(self, "weights") and self.weights is not None:
+                sample_weight = np.asarray(self.weights)
+            # For this wrapper, we pass penalties via relative_penalties
+            relative_penalties = (
+                np.asarray(penalty_factor_fit, dtype=float)
+                if penalty_factor_fit is not None
+                else None
             )
 
-            # Refit if intercept sign constraint violated
+            est = est.fit(
+                X_fit,
+                y_adjusted,
+                sample_weight=sample_weight,
+                relative_penalties=relative_penalties,
+            )
+
+            # Extract coefficients at specified lambda
+            coef_fitted, intercept_fitted = self._extract_solution(
+                est, self.lambda_value
+            )
+
+            # Intercept sign handling: if requested non_negative and negative found, refit without intercept
             if (
-                actual_fit_intercept_in_optim
+                self.fixed_intercept is None
+                and self.fit_intercept
                 and self.intercept_sign == "non_negative"
-                and opt_intercept_on_scaled_basis < 0
+                and intercept_fitted < 0
             ):
-                self.logger.debug(
-                    "Intercept < 0 & non_negative constraint. Refitting, scaled intercept = 0."
-                )
-                # Second attempt: do not fit intercept (effectively fix scaled intercept at 0)
-                _, opt_coeffs_on_scaled_basis = run_optimization_routine(
-                    False, y_adjusted_for_optim
-                )
-                opt_intercept_on_scaled_basis = 0.0  # Explicitly set for this path
+                self.fit_intercept = False
                 self.df_int = 0
-            # df_int already set if actual_fit_intercept_in_optim was True and no refit,
-            # or if actual_fit_intercept_in_optim was False initially.
-
-            # --- 5. Denormalize / finalize intercept and coefficients ---
-            final_coeffs_fitted_part_orig_scale = opt_coeffs_on_scaled_basis
-            final_intercept_intrinsic_orig_scale = opt_intercept_on_scaled_basis
-
-            if self.X_scaler_ is not None and opt_coeffs_on_scaled_basis.size > 0:
-                # Avoid division by zero or issues if scale_ is zero (constant feature)
-                # StandardScaler sets scale_ to 1 for constant features, so direct division is fine.
-                final_coeffs_fitted_part_orig_scale = (
-                    opt_coeffs_on_scaled_basis / self.X_scaler_.scale_
+                est = self._build_estimator(
+                    lower_limits_fit,
+                    upper_limits_fit,
+                    np.array([self.lambda_value], dtype=float),
+                )
+                est = est.fit(
+                    X_fit,
+                    y_adjusted,
+                    sample_weight=sample_weight,
+                    relative_penalties=relative_penalties,
+                )
+                coef_fitted, intercept_fitted = self._extract_solution(
+                    est, self.lambda_value
                 )
 
-                intercept_adjustment_from_X_mean = -np.dot(
-                    self.X_scaler_.mean_, final_coeffs_fitted_part_orig_scale
-                )
-                final_intercept_intrinsic_orig_scale += intercept_adjustment_from_X_mean
+            # Save model and coefficients
+            self.fitted_model = est
+            if self.fixed_intercept is None:
+                self.intercept_ = float(intercept_fitted if self.fit_intercept else 0.0)
+                self.df_int = 1 if self.fit_intercept else 0
 
-            self.intercept_ = (
-                final_intercept_intrinsic_orig_scale + intercept_offset_for_final_result
-            )
-
-            # Reconstruct full coefficient vector for X_orig
-            self.coef_ = np.zeros(n_features)
-            if current_fixed_coeffs is not None and fixed_cols:  # Fill in fixed values
-                self.coef_[fixed_cols] = np.nan_to_num(current_fixed_coeffs[fixed_cols])
-
-            if fit_cols:  # Fill in fitted values
-                fitted_vals_to_assign = np.array(
-                    final_coeffs_fitted_part_orig_scale
-                ).flatten()
-                self.coef_[fit_cols] = fitted_vals_to_assign
-
+            # Combine with fixed coefficients to full coef vector
+            combined_coef = np.zeros(X.shape[1], dtype=float)
+            if len(fit_cols) == X.shape[1]:
+                combined_coef[:] = coef_fitted
+            else:
+                # place fitted values back
+                for i, col_idx in enumerate(fit_cols):
+                    combined_coef[col_idx] = coef_fitted[i]
+                # add fixed
+                for j, col_idx in enumerate(fixed_cols):
+                    combined_coef[col_idx] = fixed_values[j]
+            self.coef_ = combined_coef
             self.full_coef_ = np.concatenate([[self.intercept_], self.coef_])
+
             return self
 
         def predict(self, X):
-            X_arr = np.asarray(X, dtype=float)
-            if self.coef_ is None or self.full_coef_ is None:
-                raise RuntimeError("Model has not been fitted yet.")
-            return np.dot(X_arr, self.coef_) + self.intercept_
+            X = np.asarray(X)
+            return X @ self.coef_ + self.intercept_
 
         def get_full_coefficients(self):
-            if self.full_coef_ is None:
-                self.logger.warning(
-                    "Full coefficients requested before model fitting or if fitting failed."
-                )
             return self.full_coef_
 
-    return PythonRidgeWrapper()
+    # Attach weights attribute to instance so fit can access it (keep same interface as rpy2 wrapper)
+    wrapper = GlmnetRidgePythonWrapper()
+    wrapper.weights = weights
+    return wrapper
 
 
 def create_ridge_model_rpy2(
@@ -370,7 +309,7 @@ def create_ridge_model_rpy2(
         penalty_factor: Penalty factors for each coefficient
         fixed_coefficients: List of fixed coefficient values (None for coefficients to be fitted)
         fixed_intercept: Fixed value for intercept (None to fit the intercept)
-        weights: Observation weights. Can be total counts if responses are proportion matrices. 
+        weights: Observation weights. Can be total counts if responses are proportion matrices.
                 Default is 1 for each observation
 
     Returns:
@@ -383,8 +322,8 @@ def create_ridge_model_rpy2(
     try:
         import rpy2.robjects as ro
         from rpy2.robjects import numpy2ri
-        from rpy2.robjects.packages import importr
         from rpy2.robjects.conversion import localconverter
+        from rpy2.robjects.packages import importr
     except ImportError:
         raise ImportError(
             "rpy2 is required for using the R implementation. Please install rpy2."

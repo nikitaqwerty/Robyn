@@ -13,10 +13,8 @@ import pandas as pd
 from nevergrad.optimization.base import Optimizer
 from robyn.modeling.entities.enums import NevergradAlgorithm
 from robyn.modeling.entities.modeloutputs import Trial
-from robyn.modeling.ridge.models.ridge_utils import create_ridge_model_rpy2
-from robyn.modeling.ridge.ridge_metrics_calculator import RidgeMetricsCalculator
+from robyn.modeling.ridge.models.ridge_utils import create_ridge_model_python
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.linear_model import Ridge
 from tqdm import tqdm
 
 
@@ -360,7 +358,7 @@ class RidgeModelEvaluator:
 
         sol_id = f"{trial}_{iter_ng + 1}_1"
 
-        # Convert fixed_coefficients from dictionary to list format expected by create_ridge_model_rpy2
+        # Convert fixed_coefficients from dictionary to list format expected by create_ridge_model_python
         # This will align fixed coefficients with X.columns
         formatted_fixed_coefficients = None
         if fixed_coefficients is not None:
@@ -610,7 +608,7 @@ class RidgeModelEvaluator:
         N = len(x_norm)
 
         # Create and fit the model with formatted fixed coefficients and fixed intercept
-        model = create_ridge_model_rpy2(
+        model = create_ridge_model_python(
             lambda_value=lambda_,
             n_samples=N,
             fit_intercept=True,
@@ -837,7 +835,7 @@ class RidgeModelEvaluator:
 
                     x_tr_np = X_tr.to_numpy()
                     y_tr_np = y_tr.to_numpy()
-                    model_cv = create_ridge_model_rpy2(
+                    model_cv = create_ridge_model_python(
                         lambda_value=params.get("lambda", 1.0),
                         n_samples=len(x_tr_np),
                         fit_intercept=True,
