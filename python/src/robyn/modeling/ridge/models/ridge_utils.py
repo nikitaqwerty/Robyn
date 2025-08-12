@@ -23,6 +23,8 @@ def create_ridge_model_python(
     fixed_coefficients=None,
     fixed_intercept=None,
     weights=None,
+    intercept_lower_limit=None,
+    intercept_upper_limit=None,
 ):
     """Create a Python-native Ridge regression model with constraints using python-glmnet.
 
@@ -52,6 +54,17 @@ def create_ridge_model_python(
             )
             self.fixed_intercept: Optional[float] = (
                 float(fixed_intercept) if fixed_intercept is not None else None
+            )
+            # Optional intercept bounds
+            self.intercept_lower_limit: Optional[float] = (
+                float(intercept_lower_limit)
+                if intercept_lower_limit is not None
+                else None
+            )
+            self.intercept_upper_limit: Optional[float] = (
+                float(intercept_upper_limit)
+                if intercept_upper_limit is not None
+                else None
             )
 
             # Persist original constraints/penalties; will be subset as needed
@@ -251,6 +264,50 @@ def create_ridge_model_python(
             if self.fixed_intercept is None:
                 self.intercept_ = float(intercept_fitted if self.fit_intercept else 0.0)
                 self.df_int = 1 if self.fit_intercept else 0
+
+            # Enforce optional intercept bounds by refitting with fixed intercept at boundary if violated
+            if self.fixed_intercept is None and (
+                self.intercept_lower_limit is not None
+                or self.intercept_upper_limit is not None
+            ):
+                current_intercept = float(self.intercept_)
+                violate_lower = (
+                    self.intercept_lower_limit is not None
+                    and current_intercept < self.intercept_lower_limit
+                )
+                violate_upper = (
+                    self.intercept_upper_limit is not None
+                    and current_intercept > self.intercept_upper_limit
+                )
+                if violate_lower or violate_upper:
+                    # Pick the nearest boundary value
+                    bound_value = current_intercept
+                    if violate_lower:
+                        bound_value = self.intercept_lower_limit  # type: ignore[assignment]
+                    if violate_upper:
+                        bound_value = self.intercept_upper_limit  # type: ignore[assignment]
+
+                    # Refit with intercept fixed to bound: disable intercept in estimator
+                    self.fit_intercept = False
+                    self.df_int = 0
+                    est = self._build_estimator(
+                        lower_limits_fit,
+                        upper_limits_fit,
+                        np.array([self.lambda_value], dtype=float),
+                    )
+                    # Adjust target to account for fixed intercept at the boundary
+                    y_adjusted_refit = y_adjusted - bound_value
+                    est = est.fit(
+                        X_fit,
+                        y_adjusted_refit,
+                        sample_weight=sample_weight,
+                        relative_penalties=relative_penalties,
+                    )
+                    coef_fitted, _ = self._extract_solution(est, self.lambda_value)
+                    # Update intercept and fitted model
+                    self.fitted_model = est
+                    self.intercept_ = float(bound_value)
+                    self.df_int = 0
 
             # Combine with fixed coefficients to full coef vector
             combined_coef = np.zeros(X.shape[1], dtype=float)

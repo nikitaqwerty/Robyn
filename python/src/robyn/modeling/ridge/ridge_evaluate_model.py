@@ -664,6 +664,8 @@ class RidgeModelEvaluator:
             fixed_coefficients=formatted_fixed_coefficients,  # Pass the formatted fixed coefficients
             fixed_intercept=fixed_intercept,  # Pass the fixed intercept
             weights=weights_train,
+            intercept_lower_limit=intercept_lower_limit,
+            intercept_upper_limit=intercept_upper_limit,
         )
 
         self.logger.debug(
@@ -899,6 +901,8 @@ class RidgeModelEvaluator:
                         penalty_factor=penalty_factor,
                         fixed_coefficients=formatted_fixed_coefficients,
                         fixed_intercept=fixed_intercept,
+                        intercept_lower_limit=intercept_lower_limit,
+                        intercept_upper_limit=intercept_upper_limit,
                         weights=(
                             observation_weights_cv[start_train:start_test]
                             if observation_weights_cv is not None
