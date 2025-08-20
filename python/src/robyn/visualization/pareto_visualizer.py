@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import ticker
+
 from robyn.data.entities.enums import DependentVarType, ProphetVariableType
 from robyn.data.entities.holidays_data import HolidaysData
 from robyn.data.entities.hyperparameters import AdstockType, Hyperparameters
@@ -1469,8 +1470,39 @@ class ParetoVisualizer(BaseVisualizer):
         for i, var in enumerate(df_long["variable"].unique()):
             ax = prophet_decomp_plot.add_subplot(gs[i, 0])
             var_data = df_long[df_long["variable"] == var]
-            ax.plot(var_data["ds"], var_data["value"], color="steelblue")
-            ax.set_title(var)
+
+            # Special handling for weekday variable
+            if var == "weekday":
+                # Extract one week of data for weekday visualization
+                # Get the first 7 days of weekday data
+                weekday_data = var_data.head(7).copy()
+
+                # Create weekday labels
+                weekday_labels = [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday",
+                    "Saturday",
+                    "Sunday",
+                ]
+
+                # Plot with weekday labels on x-axis
+                ax.plot(
+                    range(len(weekday_data)),
+                    weekday_data["value"],
+                    color="steelblue",
+                    marker="o",
+                )
+                ax.set_xticks(range(len(weekday_data)))
+                ax.set_xticklabels(weekday_labels, rotation=45)
+                ax.set_title(f"{var} (Weekly Pattern)")
+            else:
+                # Regular time series plot for other variables
+                ax.plot(var_data["ds"], var_data["value"], color="steelblue")
+                ax.set_title(var)
+
             ax.set_xlabel(None)
             ax.set_ylabel(None)
         plt.suptitle("Prophet decomposition")

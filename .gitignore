@@ -56,3 +56,4 @@ python/src/robyn/debug/*
 *.pyc
 .vscode/launch.json
 context.txt
+python/src/robyn/modeling/ridge/models/Robyn.code-workspace

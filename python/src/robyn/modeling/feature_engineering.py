@@ -1,24 +1,22 @@
 # pyre-strict
 
-from typing import Optional, Dict, Any
 import logging
-import pandas as pd
 import warnings
+from typing import Any, Dict, Optional
+
+import numpy as np
+import pandas as pd
 from scipy.optimize import curve_fit
 from sklearn.linear_model import LinearRegression
-import numpy as np
 
 np.float_ = np.float64
 from prophet import Prophet
+
+from robyn.data.entities.enums import AdstockType
 from robyn.data.entities.holidays_data import HolidaysData
-
-from robyn.data.entities.enums import (
-    AdstockType,
-)
-from robyn.modeling.entities.featurized_mmm_data import FeaturizedMMMData
-from robyn.data.entities.hyperparameters import Hyperparameters, ChannelHyperparameters
+from robyn.data.entities.hyperparameters import ChannelHyperparameters, Hyperparameters
 from robyn.data.entities.mmmdata import MMMData
-
+from robyn.modeling.entities.featurized_mmm_data import FeaturizedMMMData
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +40,9 @@ class FeatureEngineering:
             "Initializing FeatureEngineering with MMM data and hyperparameters"
         )
 
-    def perform_feature_engineering(self, quiet: bool = False) -> FeaturizedMMMData:
+    def perform_feature_engineering(
+        self, quiet: bool = False, full_data: Optional[pd.DataFrame] = None
+    ) -> FeaturizedMMMData:
         self.logger.info("Starting feature engineering process")
         self.logger.debug(f"Input data shape: {self.mmm_data.data.shape}")
 
@@ -58,7 +58,21 @@ class FeatureEngineering:
 
         if prophet_enabled:
             self.logger.info("Starting Prophet decomposition")
-            dt_transform = self._prophet_decomposition(dt_transform)
+            if full_data is not None:
+                self.logger.info(
+                    "Using full dataset for Prophet decomposition calculations"
+                )
+                # Prepare full dataset for Prophet
+                dt_full_prepared = self._prepare_prophet_data(full_data)
+                # Apply Prophet decomposition on full dataset
+                dt_full_with_prophet = self._prophet_decomposition(dt_full_prepared)
+                # Crop Prophet results to match training window
+                dt_transform = self._crop_prophet_results(
+                    dt_transform, dt_full_with_prophet
+                )
+            else:
+                self.logger.info("Using training dataset for Prophet decomposition")
+                dt_transform = self._prophet_decomposition(dt_transform)
             if not quiet:
                 self.logger.info("Prophet decomposition complete")
         else:
@@ -162,6 +176,130 @@ class FeatureEngineering:
                     self.logger.warning(f"Could not convert {var} to numeric: {str(e)}")
 
         self.logger.debug("Data preparation complete")
+        return dt_transform
+
+    def _prepare_prophet_data(self, full_data: pd.DataFrame) -> pd.DataFrame:
+        """Prepare full dataset for Prophet decomposition.
+
+        Args:
+            full_data: Full dataset before cropping
+
+        Returns:
+            Prepared full dataset
+        """
+        self.logger.debug("Starting Prophet data preparation for full dataset")
+        dt_transform_full = full_data.copy()
+
+        # Ensure Date column is datetime
+        if "Date" in dt_transform_full.columns:
+            dt_transform_full["ds"] = pd.to_datetime(dt_transform_full["Date"])
+        else:
+            dt_transform_full["ds"] = pd.to_datetime(
+                dt_transform_full[self.mmm_data.mmmdata_spec.date_var]
+            )
+
+        # Add dependent variable
+        dt_transform_full["dep_var"] = dt_transform_full[
+            self.mmm_data.mmmdata_spec.dep_var
+        ]
+
+        # Set default factor_vars if None
+        if self.mmm_data.mmmdata_spec.factor_vars is None:
+            self.mmm_data.set_default_factor_vars()
+        factor_vars = self.mmm_data.mmmdata_spec.factor_vars or []
+
+        # Handle factor variables conversion first
+        for factor_var in factor_vars:
+            if factor_var in dt_transform_full.columns:
+                try:
+                    dt_transform_full[factor_var] = dt_transform_full[
+                        factor_var
+                    ].astype("category")
+                    self.logger.debug(f"Converted {factor_var} to categorical")
+                except Exception as e:
+                    self.logger.warning(
+                        f"Could not convert {factor_var} to categorical: {str(e)}"
+                    )
+
+        # Only convert context variables that are used in numerical calculations
+        # i.e., those that aren't categorical/factor variables
+        numeric_context_vars = [
+            var
+            for var in self.mmm_data.mmmdata_spec.context_vars
+            if var not in factor_vars
+            and var in dt_transform_full.columns
+            and pd.api.types.is_object_dtype(dt_transform_full[var])
+        ]
+
+        if numeric_context_vars:
+            self.logger.debug(
+                f"Converting numeric context variables in full dataset: {numeric_context_vars}"
+            )
+            for var in numeric_context_vars:
+                try:
+                    dt_transform_full[var] = pd.to_numeric(
+                        dt_transform_full[var], errors="coerce"
+                    )
+                    self.logger.debug(
+                        f"Converted {var} to numeric: {dt_transform_full[var].dtype}"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Could not convert {var} to numeric: {str(e)}")
+
+        self.logger.debug("Prophet data preparation for full dataset complete")
+        return dt_transform_full
+
+    def _crop_prophet_results(
+        self, dt_transform: pd.DataFrame, dt_full_with_prophet: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Crop Prophet results from full dataset to match training window.
+
+        Args:
+            dt_transform: Training window dataset
+            dt_full_with_prophet: Full dataset with Prophet decomposition
+
+        Returns:
+            Training dataset with cropped Prophet results
+        """
+        self.logger.debug("Cropping Prophet results to training window")
+
+        # Get the date range from the training window
+        train_start = dt_transform["ds"].min()
+        train_end = dt_transform["ds"].max()
+
+        self.logger.debug(f"Training window: {train_start} to {train_end}")
+
+        # Filter full Prophet results to training window
+        prophet_vars = self.holidays_data.prophet_vars
+        full_prophet_subset = dt_full_with_prophet[
+            (dt_full_with_prophet["ds"] >= train_start)
+            & (dt_full_with_prophet["ds"] <= train_end)
+        ].copy()
+
+        self.logger.debug(
+            f"Cropped Prophet results from {len(dt_full_with_prophet)} to {len(full_prophet_subset)} rows"
+        )
+
+        # Add Prophet variables to training dataset
+        for prophet_var in prophet_vars:
+            if prophet_var in full_prophet_subset.columns:
+                # Match by date to ensure proper alignment
+                prophet_series = full_prophet_subset.set_index("ds")[prophet_var]
+                dt_transform_indexed = dt_transform.set_index("ds")
+
+                # Align Prophet results with training data
+                dt_transform.loc[:, prophet_var] = dt_transform_indexed.index.map(
+                    prophet_series
+                ).values
+                self.logger.debug(
+                    f"Added Prophet variable {prophet_var} to training dataset"
+                )
+            else:
+                self.logger.warning(
+                    f"Prophet variable {prophet_var} not found in full Prophet results"
+                )
+
+        self.logger.debug("Prophet results cropping complete")
         return dt_transform
 
     def _create_rolling_window_data(self, dt_transform: pd.DataFrame) -> pd.DataFrame:
