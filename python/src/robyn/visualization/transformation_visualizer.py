@@ -183,11 +183,51 @@ class TransformationVisualizer(BaseVisualizer):
                 bar_data["variable"].str.replace("_", " ").str.title()
             )
 
+            # Set up dimensions first to calculate optimal figure size
+            channels = sorted(
+                line_data["rn"].unique()
+            )  # Use line_data for consistent ordering
+            y_pos = np.arange(len(channels))
+            num_channels = len(channels)
+
+            logger.debug("Processing %d channels for visualization", num_channels)
+
+            # Calculate dynamic dimensions based on number of channels
+            # Minimum height of 8, plus 0.8 for each channel, with a maximum of 20
+            dynamic_height = min(max(8, 6 + num_channels * 0.8), 20)
+
+            # Adjust bar width based on number of channels to prevent overlap
+            # Use smaller bars when there are many channels
+            if num_channels <= 5:
+                bar_width = 0.35
+            elif num_channels <= 10:
+                bar_width = 0.25
+            else:
+                bar_width = 0.2
+
+            # Adjust font sizes based on number of channels
+            if num_channels <= 5:
+                label_fontsize = 12
+                line_label_fontsize = 12
+            elif num_channels <= 10:
+                label_fontsize = 11
+                line_label_fontsize = 11
+            else:
+                label_fontsize = 10
+                line_label_fontsize = 10
+
             # Create figure if no axes provided
             if ax is None:
-                logger.debug("Creating new figure and axes")
-                fig, ax = plt.subplots(figsize=(16, 10))
-                plt.subplots_adjust(top=0.80, left=0.15, bottom=0.1, right=0.95)
+                logger.debug(
+                    "Creating new figure and axes with dynamic height: %.1f",
+                    dynamic_height,
+                )
+                fig, ax = plt.subplots(figsize=(16, dynamic_height))
+                # Adjust margins based on figure height
+                top_margin = max(
+                    0.85, 1 - (2.0 / dynamic_height)
+                )  # More space for title
+                plt.subplots_adjust(top=top_margin, left=0.15, bottom=0.1, right=0.95)
             else:
                 logger.debug("Using provided axes for plotting")
                 fig = None
@@ -200,16 +240,7 @@ class TransformationVisualizer(BaseVisualizer):
             bar_colors = ["#A4C2F4", "#FFB7B2"]  # Light blue and light coral for bars
             bar_colors = bar_colors[::-1]  # Reverse colors
 
-            # Set up dimensions
-            channels = sorted(
-                line_data["rn"].unique()
-            )  # Use line_data for consistent ordering
-            y_pos = np.arange(len(channels))
-
-            logger.debug("Processing %d channels for visualization", len(channels))
-
             # Plot bars for each variable type
-            bar_width = 0.35
             for i, (var, color) in enumerate(
                 zip(reversed(bar_data["variable"].unique()), bar_colors)
             ):
@@ -247,7 +278,7 @@ class TransformationVisualizer(BaseVisualizer):
                         ha="left",
                         va="center",
                         fontweight="bold",
-                        fontsize=9,
+                        fontsize=label_fontsize,
                         transform=ax.get_yaxis_transform(),
                     )
 
@@ -277,6 +308,7 @@ class TransformationVisualizer(BaseVisualizer):
                     f"{value:.2f}",
                     color=type_colour,
                     fontweight="bold",
+                    fontsize=line_label_fontsize,
                     ha="left",  # Left align since we're positioning to the right of dots
                     va="center",
                     zorder=4,
@@ -324,7 +356,9 @@ class TransformationVisualizer(BaseVisualizer):
             ax.set_title(
                 f"Share of Total Spend, Effect & {metric_type} in Modeling Window*",
                 pad=20,
-                y=1.45,
+                y=1.08,
+                fontsize=14,
+                fontweight="bold",
             )
 
             # Create legend with single ROAS entry
@@ -365,7 +399,9 @@ class TransformationVisualizer(BaseVisualizer):
             logger.debug("Successfully generated spend effect comparison plot")
             if fig:
                 plt.tight_layout()
-                plt.subplots_adjust(top=0.80, left=0.15, bottom=0.1, right=0.95)
+                # Use the same dynamic top margin calculated earlier
+                top_margin = max(0.85, 1 - (2.0 / dynamic_height))
+                plt.subplots_adjust(top=top_margin, left=0.15, bottom=0.1, right=0.95)
                 return fig
             return None
 
@@ -634,9 +670,41 @@ class TransformationVisualizer(BaseVisualizer):
         # Transform variable names
         bar_data["variable"] = bar_data["variable"].str.replace("_", " ").str.title()
 
+        # Set up dimensions first to calculate optimal figure size
+        channels = sorted(line_data["rn"].unique())
+        y_pos = np.arange(len(channels))
+        num_channels = len(channels)
+
+        # Calculate dynamic dimensions based on number of channels
+        # Minimum height of 8, plus 0.8 for each channel, with a maximum of 20
+        dynamic_height = min(max(8, 6 + num_channels * 0.8), 20)
+
+        # Adjust bar width based on number of channels to prevent overlap
+        # Use smaller bars when there are many channels
+        if num_channels <= 5:
+            bar_width = 0.35
+        elif num_channels <= 10:
+            bar_width = 0.25
+        else:
+            bar_width = 0.2
+
+        # Adjust font sizes based on number of channels
+        if num_channels <= 5:
+            label_fontsize = 9
+            line_label_fontsize = 9
+        elif num_channels <= 10:
+            label_fontsize = 8
+            line_label_fontsize = 8
+        else:
+            label_fontsize = 7
+            line_label_fontsize = 7
+
         # Create figure if no axes provided
         if ax is None:
-            fig, ax = plt.subplots(figsize=(16, 10))
+            fig, ax = plt.subplots(figsize=(16, dynamic_height))
+            # Adjust margins based on figure height
+            top_margin = max(0.85, 1 - (2.0 / dynamic_height))  # More space for title
+            plt.subplots_adjust(top=top_margin, left=0.15, bottom=0.1, right=0.95)
             return_value = fig
         else:
             fig = None
@@ -652,10 +720,6 @@ class TransformationVisualizer(BaseVisualizer):
         bar_colors = ["#A4C2F4", "#FFB7B2"]  # Light blue and light coral for bars
         bar_colors = bar_colors[::-1]  # Reverse colors
 
-        # Set up dimensions
-        channels = sorted(line_data["rn"].unique())
-        y_pos = np.arange(len(channels))
-
         # Calculate new y_sec_scale based on the filtered data
         max_bar_value = bar_data["value"].max()
         max_line_value = line_data["value"].max()
@@ -663,7 +727,6 @@ class TransformationVisualizer(BaseVisualizer):
             y_sec_scale = max_line_value / max_bar_value * 1.1
 
         # Plot bars for each variable type
-        bar_width = 0.35
         for i, (var, color) in enumerate(
             zip(reversed(bar_data["variable"].unique()), bar_colors)
         ):
@@ -697,7 +760,7 @@ class TransformationVisualizer(BaseVisualizer):
                     ha="left",
                     va="center",
                     fontweight="bold",
-                    fontsize=9,
+                    fontsize=label_fontsize,
                     transform=ax.get_yaxis_transform(),
                 )
 
@@ -724,6 +787,7 @@ class TransformationVisualizer(BaseVisualizer):
                 f"{value:.2f}",
                 color=type_colour,
                 fontweight="bold",
+                fontsize=line_label_fontsize,
                 ha="left",
                 va="center",
                 zorder=4,
