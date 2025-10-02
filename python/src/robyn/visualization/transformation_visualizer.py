@@ -184,9 +184,19 @@ class TransformationVisualizer(BaseVisualizer):
             )
 
             # Set up dimensions first to calculate optimal figure size
-            channels = sorted(
-                line_data["rn"].unique()
-            )  # Use line_data for consistent ordering
+            # Sort channels by effect share (highest on top, lowest on bottom)
+            effect_share_data = bar_data[bar_data["variable"] == "Effect Share"]
+            channel_order = (
+                effect_share_data.sort_values("value", ascending=True)["rn"]
+                .unique()
+                .tolist()
+            )
+            # Use all channels from line_data in case some are missing from bar_data
+            channels = [ch for ch in channel_order if ch in line_data["rn"].unique()]
+            # Add any missing channels at the bottom
+            for ch in line_data["rn"].unique():
+                if ch not in channels:
+                    channels.append(ch)
             y_pos = np.arange(len(channels))
             num_channels = len(channels)
 
@@ -671,7 +681,19 @@ class TransformationVisualizer(BaseVisualizer):
         bar_data["variable"] = bar_data["variable"].str.replace("_", " ").str.title()
 
         # Set up dimensions first to calculate optimal figure size
-        channels = sorted(line_data["rn"].unique())
+        # Sort channels by effect share (highest on top, lowest on bottom)
+        effect_share_data = bar_data[bar_data["variable"] == "Effect Share"]
+        channel_order = (
+            effect_share_data.sort_values("value", ascending=True)["rn"]
+            .unique()
+            .tolist()
+        )
+        # Use all channels from line_data in case some are missing from bar_data
+        channels = [ch for ch in channel_order if ch in line_data["rn"].unique()]
+        # Add any missing channels at the bottom
+        for ch in line_data["rn"].unique():
+            if ch not in channels:
+                channels.append(ch)
         y_pos = np.arange(len(channels))
         num_channels = len(channels)
 
