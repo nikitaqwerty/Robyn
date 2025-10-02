@@ -26,6 +26,23 @@ class TransformationVisualizer(BaseVisualizer):
         self.pareto_result = pareto_result
         self.mmm_data = mmm_data
 
+    @staticmethod
+    def _format_metric_value(value: float) -> str:
+        """
+        Format metric values (CPA/ROAS) with 1 decimal place and space as thousands separator.
+
+        Args:
+            value: The numeric value to format
+
+        Returns:
+            Formatted string (e.g., "1 234.5" for 1234.567)
+        """
+        # Round to 1 decimal place
+        rounded_value = round(value, 1)
+
+        # Format with thousands separator as space
+        return f"{rounded_value:,.1f}".replace(",", " ")
+
     def create_adstock_plots(self) -> None:
         """
         Generate adstock visualization plots and store them as instance variables.
@@ -137,9 +154,18 @@ class TransformationVisualizer(BaseVisualizer):
             raise
 
     def generate_spend_effect_comparison(
-        self, solution_id: str, ax: Optional[plt.Axes] = None
+        self,
+        solution_id: str,
+        ax: Optional[plt.Axes] = None,
+        filter_channel: Optional[List[str]] = None,
     ) -> Optional[plt.Figure]:
-        """Generate comparison plot of spend share vs effect share."""
+        """Generate comparison plot of spend share vs effect share.
+
+        Args:
+            solution_id: ID of the solution to visualize
+            ax: Optional matplotlib axes to plot on
+            filter_channel: Optional list of channel names to filter out from visualization
+        """
 
         logger.debug("Starting generation of spend effect comparison plot")
         try:
@@ -152,6 +178,12 @@ class TransformationVisualizer(BaseVisualizer):
                 bar_data = plot_data["plot1data"]["plotMediaShareLoopBar"].copy()
                 line_data = plot_data["plot1data"]["plotMediaShareLoopLine"].copy()
                 y_sec_scale = plot_data["plot1data"]["ySecScale"]
+
+                # Apply channel filter if provided
+                if filter_channel:
+                    logger.debug(f"Filtering out channels: {filter_channel}")
+                    bar_data = bar_data[~bar_data["rn"].isin(filter_channel)]
+                    line_data = line_data[~line_data["rn"].isin(filter_channel)]
 
                 logger.debug(
                     "Processing plot data - bar_data shape: %s, line_data shape: %s",
@@ -302,6 +334,17 @@ class TransformationVisualizer(BaseVisualizer):
                     line_values.append(0)
 
             line_values = np.array(line_values)
+
+            # Recalculate y_sec_scale if channels were filtered to redraw CPA/ROAS line
+            if filter_channel and len(line_values) > 0:
+                max_bar_value = bar_data["value"].max()
+                max_line_value = line_values.max()
+                if max_bar_value > 0 and max_line_value > 0:
+                    y_sec_scale = max_line_value / max_bar_value * 1.1
+                    logger.debug(
+                        f"Recalculated y_sec_scale after filtering: {y_sec_scale}"
+                    )
+
             line_x = line_values / y_sec_scale
 
             logger.debug("Plotting line with %d points", len(line_x))
@@ -315,7 +358,7 @@ class TransformationVisualizer(BaseVisualizer):
                 ax.text(
                     line_x[i] + 0.02,  # Added offset to move labels right of dots
                     y_pos[i],
-                    f"{value:.2f}",
+                    self._format_metric_value(value),
                     color=type_colour,
                     fontweight="bold",
                     fontsize=line_label_fontsize,
@@ -437,6 +480,7 @@ class TransformationVisualizer(BaseVisualizer):
         date_range: List[str],
         ax: Optional[plt.Axes] = None,
         metrics: Optional[Dict[str, float]] = None,
+        filter_channel: Optional[List[str]] = None,
     ) -> Union[plt.Figure, bool]:
         """Generate comparison plot of spend share vs effect share for a specific date range.
 
@@ -445,6 +489,7 @@ class TransformationVisualizer(BaseVisualizer):
             date_range: List of two elements [start_date, end_date] for filtering data
             ax: Optional matplotlib axes to plot on. If None, creates new figure
             metrics: Optional dictionary containing model performance metrics
+            filter_channel: Optional list of channel names to filter out from visualization
 
         Returns:
             Union[plt.Figure, bool]: Generated matplotlib Figure object or True if successful using provided axes
@@ -664,6 +709,12 @@ class TransformationVisualizer(BaseVisualizer):
             bar_data = pd.DataFrame(bar_data_list)
             line_data = pd.DataFrame(line_data_list)
 
+            # Apply channel filter if provided
+            if filter_channel:
+                logger.debug(f"Filtering out channels: {filter_channel}")
+                bar_data = bar_data[~bar_data["rn"].isin(filter_channel)]
+                line_data = line_data[~line_data["rn"].isin(filter_channel)]
+
         except Exception as e:
             logger.error(f"Error filtering data by date range: {str(e)}")
             if ax:
@@ -745,8 +796,10 @@ class TransformationVisualizer(BaseVisualizer):
         # Calculate new y_sec_scale based on the filtered data
         max_bar_value = bar_data["value"].max()
         max_line_value = line_data["value"].max()
-        if max_bar_value > 0 and max_line_value > 0:
-            y_sec_scale = max_line_value / max_bar_value * 1.1
+        # Cap max_line_value at 50000 to prevent outliers from scaling the chart unreadably
+        max_line_value_capped = min(max_line_value, 50000)
+        if max_bar_value > 0 and max_line_value_capped > 0:
+            y_sec_scale = max_line_value_capped / max_bar_value * 1.1
 
         # Plot bars for each variable type
         for i, (var, color) in enumerate(
@@ -796,17 +849,31 @@ class TransformationVisualizer(BaseVisualizer):
                 line_values.append(0)
 
         line_values = np.array(line_values)
-        line_x = line_values / y_sec_scale
+
+        # Recalculate y_sec_scale if channels were filtered to redraw CPA/ROAS line
+        if filter_channel and len(line_values) > 0:
+            max_bar_value = bar_data["value"].max()
+            max_line_value = line_values.max()
+            # Cap max_line_value at 50000 to prevent outliers from scaling the chart unreadably
+            max_line_value_capped = min(max_line_value, 50000)
+            if max_bar_value > 0 and max_line_value_capped > 0:
+                y_sec_scale = max_line_value_capped / max_bar_value * 1.1
+                logger.debug(f"Recalculated y_sec_scale after filtering: {y_sec_scale}")
+
+        # Cap line values at 50000 for plotting to keep them within chart boundaries
+        # but keep original values for labels
+        line_values_capped = np.minimum(line_values, 50000)
+        line_x = line_values_capped / y_sec_scale
 
         # Plot line
         ax.plot(line_x, y_pos, color=type_colour, marker="o", markersize=8, zorder=3)
 
-        # Add line value labels
+        # Add line value labels (using original uncapped values)
         for i, value in enumerate(line_values):
             ax.text(
                 line_x[i] + 0.02,
                 y_pos[i],
-                f"{value:.2f}",
+                self._format_metric_value(value),
                 color=type_colour,
                 fontweight="bold",
                 fontsize=line_label_fontsize,
@@ -1012,6 +1079,7 @@ class TransformationVisualizer(BaseVisualizer):
         self,
         solution_id: str,
         metrics: Optional[Dict[str, float]] = None,
+        filter_channel: Optional[List[str]] = None,
     ) -> Optional[plt.Figure]:
         """
         Generate spend effect comparison charts for each of the last four quarters in a 2x2 grid.
@@ -1019,6 +1087,7 @@ class TransformationVisualizer(BaseVisualizer):
         Args:
             solution_id: ID of the solution to visualize
             metrics: Optional dictionary containing model performance metrics
+            filter_channel: Optional list of channel names to filter out from visualization
 
         Returns:
             Optional[plt.Figure]: Generated matplotlib Figure object with 4 subplots
@@ -1056,6 +1125,7 @@ class TransformationVisualizer(BaseVisualizer):
                         date_range=quarter_range,
                         ax=axes[i],
                         metrics=None,  # Don't add metrics to individual subplots
+                        filter_channel=filter_channel,
                     )
                 )
 
@@ -1348,22 +1418,25 @@ class TransformationVisualizer(BaseVisualizer):
         solution_id: str,
         display_plots: bool = True,
         export_location: Union[str, Path] = None,
+        filter_channel: Optional[List[str]] = None,
     ) -> Dict[str, plt.Figure]:
         """
         Create all allocator plots and generate monthly spend effect CSV.
         Parameters:
             display_plots (bool): Whether to display the plots
             export_location (Union[str, Path]): Location to export plots and CSV
-            quiet (bool): If True, suppresses logging output
+            filter_channel (Optional[List[str]]): List of channel names to filter out from visualization.
+                The numbers on the plot remain unchanged, but the CPA/ROAS line is redrawn after filtering.
+                Useful for beautifying charts when there are outliers with very high CPA numbers.
         """
 
         try:
             plots = {
                 "spend_effect_comparison": self.generate_spend_effect_comparison(
-                    solution_id
+                    solution_id, filter_channel=filter_channel
                 ),
                 "quarterly_spend_effect_comparison": self.generate_quarterly_spend_effect_comparison(
-                    solution_id
+                    solution_id, filter_channel=filter_channel
                 ),
             }
 
