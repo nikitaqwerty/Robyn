@@ -529,10 +529,15 @@ class AllocatorVisualizer(BaseVisualizer):
             self.logger.error("Failed to create allocation comparison plot: %s", str(e))
             raise
 
-    def _plot_response_curves(self, projection_limit: float = None):
-        """Create response curves plot with solid line up to initial spend and dotted extension."""
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
+    def _plot_response_curves(
+        self, projection_limit: float = None, channels: list = None
+    ):
+        """Create response curves plot with solid line up to initial spend and dotted extension.
+
+        Args:
+            projection_limit: Maximum spend to project on x-axis
+            channels: List of channel names to plot. If None, plots all channels.
+        """
 
         # Define a color palette for consistent styling
         colors = [
@@ -551,6 +556,9 @@ class AllocatorVisualizer(BaseVisualizer):
         # Prepare constraint labels
         constr_labels = []
         for _, row in self.dt_optim_out.iterrows():
+            # Filter by channels if provided
+            if channels is not None and row["channels"] not in channels:
+                continue
             label = (
                 f"{row['channels']}\n"
                 f"[{row['constr_low']} - {row['constr_up']}] & "
@@ -778,13 +786,14 @@ class AllocatorVisualizer(BaseVisualizer):
         return fig
 
     def _plot_combined_response_curves(
-        self, max_projection_spend: float = 50000000
+        self, max_projection_spend: float = 50000000, channels: list = None
     ) -> go.Figure:
         """
         Plot response curves for all channels on a single plot for comparison.
 
         Args:
             max_projection_spend: Maximum spend to project for any channel (default: 50,000,000)
+            channels: List of channel names to plot. If None, plots all channels.
         """
         logger.info("Creating combined response curves plot")
         try:
@@ -818,9 +827,19 @@ class AllocatorVisualizer(BaseVisualizer):
             # Get response curve data
             plotDT_scurve = self.eval_list["plotDT_scurve"]
 
+            # Filter channels if provided
+            channels_to_plot = (
+                channels
+                if channels is not None
+                else self.dt_optim_out["channels"].tolist()
+            )
+
             # --- Find max Y value across all channels for the current max_projection_spend ---
             max_y = 0
             for i, channel in enumerate(self.dt_optim_out["channels"]):
+                # Skip if not in filtered channels
+                if channel not in channels_to_plot:
+                    continue
                 channel_data = plotDT_scurve[plotDT_scurve["channel"] == channel]
                 initial_spend = self.dt_optim_out["initSpendUnit"].iloc[i]
                 if initial_spend < 500000:
@@ -853,6 +872,9 @@ class AllocatorVisualizer(BaseVisualizer):
 
             # Process channels
             for i, channel in enumerate(self.dt_optim_out["channels"]):
+                # Skip if not in filtered channels
+                if channel not in channels_to_plot:
+                    continue
                 # Filter data for this channel
                 channel_data = plotDT_scurve[plotDT_scurve["channel"] == channel]
 
@@ -1034,6 +1056,7 @@ class AllocatorVisualizer(BaseVisualizer):
         saturation_method: str = "marginal_based",
         saturation_percentage: float = 0.8,
         marginal_threshold: float = 0.3,
+        channels: list = None,
     ) -> Dict[str, plt.Figure]:
         """
         Create all allocator plots.
@@ -1041,6 +1064,11 @@ class AllocatorVisualizer(BaseVisualizer):
             display_plots (bool): Whether to display the plots
             export_location (Union[str, Path]): Location to export plots
             quiet (bool): If True, suppresses logging output
+            calculate_saturation (bool): Whether to calculate saturation points
+            saturation_method (str): Method to calculate saturation ('marginal_based' or 'response_based')
+            saturation_percentage (float): Percentage for response_based method
+            marginal_threshold (float): Threshold for marginal_based method
+            channels (list): List of channel names to plot response curves for. If None, plots all channels.
         """
 
         try:
@@ -1079,20 +1107,24 @@ class AllocatorVisualizer(BaseVisualizer):
                 "budget_opt": self._plot_response_spend_comparison(),
                 "allocation": self._plot_allocation_comparison(),
                 # Three response curves with different projection limits
-                "response_10M": self._plot_response_curves(projection_limit=10_000_000),
-                "response_50M": self._plot_response_curves(projection_limit=50_000_000),
+                "response_10M": self._plot_response_curves(
+                    projection_limit=10_000_000, channels=channels
+                ),
+                "response_50M": self._plot_response_curves(
+                    projection_limit=50_000_000, channels=channels
+                ),
                 "response_100M": self._plot_response_curves(
-                    projection_limit=100_000_000
+                    projection_limit=100_000_000, channels=channels
                 ),
                 # Three combined response curves with different projection limits
                 "combined_response_10M": self._plot_combined_response_curves(
-                    max_projection_spend=10_000_000
+                    max_projection_spend=10_000_000, channels=channels
                 ),
                 "combined_response_50M": self._plot_combined_response_curves(
-                    max_projection_spend=50_000_000
+                    max_projection_spend=50_000_000, channels=channels
                 ),
                 "combined_response_100M": self._plot_combined_response_curves(
-                    max_projection_spend=100_000_000
+                    max_projection_spend=100_000_000, channels=channels
                 ),
             }
 
