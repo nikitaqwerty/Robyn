@@ -1075,6 +1075,76 @@ class TransformationVisualizer(BaseVisualizer):
         # Return quarters from oldest to newest
         return sorted(quarters, key=lambda x: x[0])
 
+    def _get_last_four_months(self) -> List[List[str]]:
+        """
+        Get date ranges for the last four months, ensuring the last full month with data
+        is included and appears as the most recent month.
+
+        Returns:
+            List of four date ranges, each containing [start_date, end_date] as strings.
+            The months are ordered from oldest to newest, with the last full month being the most recent.
+        """
+        # Get the available dates from the data
+        ts_data = None
+
+        # Try to get dates from decomp_vec if available
+        if (
+            hasattr(self.pareto_result, "x_decomp_vec_collect")
+            and not self.pareto_result.x_decomp_vec_collect.empty
+        ):
+            ts_data = pd.to_datetime(
+                self.pareto_result.x_decomp_vec_collect["ds"].unique()
+            )
+        elif (
+            self.mmm_data
+            and hasattr(self.mmm_data, "dt")
+            and "ds" in self.mmm_data.dt.columns
+        ):
+            # Get dates directly from mmm_data
+            ts_data = pd.to_datetime(self.mmm_data.dt["ds"].unique())
+
+        if ts_data is None or len(ts_data) == 0:
+            logger.warning(
+                "Could not find date information to determine last four months."
+            )
+            # Return default dates (fallback to today)
+            ref_date = pd.Timestamp.now()
+            last_full_month_end = ref_date.replace(day=1) - pd.Timedelta(days=1)
+        else:
+            # Find the latest date in the data
+            max_date = pd.Timestamp(max(ts_data))
+
+            # Determine the last full month with data
+            # If max_date is in the current month and we're early in the month (< 20th),
+            # consider the previous month as the last full month
+            current_month = max_date.replace(day=1)
+            if max_date.day < 20:
+                # Consider previous month as last full month
+                last_full_month_end = current_month - pd.Timedelta(days=1)
+            else:
+                # Current month has enough data to be considered full
+                last_full_month_end = (
+                    current_month + pd.DateOffset(months=1)
+                ) - pd.Timedelta(days=1)
+
+        # Generate the last four months, starting from the last full month
+        months = []
+        for i in range(4):
+            # Calculate month end date (counting backward from last full month)
+            month_end = last_full_month_end - pd.DateOffset(months=i)
+
+            # Calculate start and end dates for this month
+            start_date = month_end.replace(day=1)
+            end_date = month_end
+
+            # Add to list
+            months.append(
+                [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+            )
+
+        # Return months from oldest to newest
+        return sorted(months, key=lambda x: x[0])
+
     def generate_quarterly_spend_effect_comparison(
         self,
         solution_id: str,
@@ -1204,6 +1274,137 @@ class TransformationVisualizer(BaseVisualizer):
 
         logger.debug(
             f"Successfully generated quarterly spend effect comparison plots for last four quarters"
+        )
+        return fig
+
+    def generate_monthly_spend_effect_comparison(
+        self,
+        solution_id: str,
+        metrics: Optional[Dict[str, float]] = None,
+        filter_channel: Optional[List[str]] = None,
+    ) -> Optional[plt.Figure]:
+        """
+        Generate spend effect comparison charts for each of the last four months in a 2x2 grid.
+
+        Args:
+            solution_id: ID of the solution to visualize
+            metrics: Optional dictionary containing model performance metrics
+            filter_channel: Optional list of channel names to filter out from visualization
+
+        Returns:
+            Optional[plt.Figure]: Generated matplotlib Figure object with 4 subplots
+        """
+        logger.debug("Starting generation of monthly spend effect comparison plots")
+
+        # Check if solution_id exists in the data
+        if solution_id not in self.pareto_result.plot_data_collect:
+            logger.warning(
+                f"Invalid solution ID: {solution_id}. Solution not found in available data."
+            )
+            return None
+
+        # Get last four months date ranges (oldest to newest)
+        months = self._get_last_four_months()
+
+        # Create month names based on the month dates
+        month_names = []
+        for month_range in months:
+            start_date = pd.to_datetime(month_range[0])
+            month_names.append(start_date.strftime("%b %Y"))
+
+        # Create a figure with 2x2 grid
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        axes = axes.flatten()
+
+        # Generate spend effect comparison for each month
+        for i, (month_range, month_name) in enumerate(zip(months, month_names)):
+            try:
+                # Call method for date-filtered spend effect comparison
+                month_plot_success = (
+                    self._generate_spend_effect_comparison_for_date_range(
+                        solution_id=solution_id,
+                        date_range=month_range,
+                        ax=axes[i],
+                        metrics=None,  # Don't add metrics to individual subplots
+                        filter_channel=filter_channel,
+                    )
+                )
+
+                # If the plot generation failed, display an error message
+                if month_plot_success is not True:
+                    axes[i].text(
+                        0.5,
+                        0.5,
+                        f"No data available for {month_name}",
+                        ha="center",
+                        va="center",
+                        transform=axes[i].transAxes,
+                    )
+
+                # Set simplified title for monthly charts
+                axes[i].set_title(f"{month_name}", pad=20, y=1.15)
+
+            except Exception as e:
+                logger.warning(
+                    f"Error generating monthly spend effect comparison for {month_name}: {e}"
+                )
+                axes[i].text(
+                    0.5,
+                    0.5,
+                    f"Error generating {month_name} spend effect comparison",
+                    ha="center",
+                    va="center",
+                    transform=axes[i].transAxes,
+                )
+                # Add error details
+                axes[i].text(
+                    0.5,
+                    0.4,
+                    str(e),
+                    ha="center",
+                    va="center",
+                    transform=axes[i].transAxes,
+                    fontsize=9,
+                    color="gray",
+                    wrap=True,
+                )
+
+        # Add overall title
+        metric_type_display = (
+            "ROAS"
+            if (
+                self.mmm_data
+                and hasattr(self.mmm_data.mmmdata_spec, "dep_var_type")
+                and self.mmm_data.mmmdata_spec.dep_var_type == DependentVarType.REVENUE
+            )
+            else "CPA"
+        )
+
+        # Get date range for title
+        start_date = pd.to_datetime(months[0][0])
+        end_date = pd.to_datetime(months[-1][1])
+        date_range = (
+            f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+        )
+
+        fig.suptitle(
+            f"Monthly Spend & Effect Share Comparison with {metric_type_display} ({date_range})\nSolution {solution_id}",
+            fontsize=16,
+            y=0.98,
+        )
+
+        # Add metrics to the overall figure
+        if metrics:
+            self._add_metrics_to_plot(fig, metrics, solution_id)
+
+        # Adjust layout
+        plt.tight_layout()
+        plt.subplots_adjust(
+            top=0.85, wspace=0.3, hspace=0.4
+        )  # Make room for overall title and metrics
+
+        logger.debug(
+            f"Successfully generated monthly spend effect comparison plots for last four months"
         )
         return fig
 
@@ -1421,7 +1622,7 @@ class TransformationVisualizer(BaseVisualizer):
         filter_channel: Optional[List[str]] = None,
     ) -> Dict[str, plt.Figure]:
         """
-        Create all allocator plots and generate monthly spend effect CSV.
+        Create all allocator plots including quarterly and monthly spend effect comparisons, and generate monthly spend effect CSV.
         Parameters:
             display_plots (bool): Whether to display the plots
             export_location (Union[str, Path]): Location to export plots and CSV
@@ -1436,6 +1637,9 @@ class TransformationVisualizer(BaseVisualizer):
                     solution_id, filter_channel=filter_channel
                 ),
                 "quarterly_spend_effect_comparison": self.generate_quarterly_spend_effect_comparison(
+                    solution_id, filter_channel=filter_channel
+                ),
+                "monthly_spend_effect_comparison": self.generate_monthly_spend_effect_comparison(
                     solution_id, filter_channel=filter_channel
                 ),
             }
