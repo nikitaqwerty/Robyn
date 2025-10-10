@@ -1,6 +1,10 @@
-import nlopt
+try:
+    import nlopt
+except ImportError:
+    nlopt = None  # #TODO: replace nlopt with a different optimizer
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
-from typing import Optional, Dict, Any, List, Union
 
 
 def run_optimization(

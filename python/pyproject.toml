@@ -35,7 +35,6 @@ dependencies = [
     "ipykernel",
     "python-glmnet==2.6.1",
     "kaleido==0.2.1",
-    "nlopt",
     "nbformat==5.10.4",
 ]
 [tool.setuptools.packages.find]

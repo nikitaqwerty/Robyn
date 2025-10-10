@@ -12,6 +12,5 @@ tqdm==4.66.5
 plotly==5.24.1
 pytest==8.3.3
 kaleido==0.2.1
-nlopt
 nbformat==5.10.4
 python-glmnet==2.6.1
