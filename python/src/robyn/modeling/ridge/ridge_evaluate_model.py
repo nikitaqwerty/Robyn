@@ -684,6 +684,7 @@ class RidgeModelEvaluator:
             weights=weights_train,
             intercept_lower_limit=intercept_lower_limit,
             intercept_upper_limit=intercept_upper_limit,
+            cores=cores,
         )
 
         self.logger.debug(
@@ -926,6 +927,7 @@ class RidgeModelEvaluator:
                             if observation_weights_cv is not None
                             else None
                         ),
+                        cores=cores,
                     )
                     model_cv.fit(x_tr_np, y_tr_np)
                     y_pred = model_cv.predict(X_te.to_numpy())

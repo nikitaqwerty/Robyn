@@ -25,6 +25,7 @@ def create_ridge_model_python(
     weights=None,
     intercept_lower_limit=None,
     intercept_upper_limit=None,
+    cores=1,
 ):
     """Create a Python-native Ridge regression model with constraints using python-glmnet.
 
@@ -88,6 +89,7 @@ def create_ridge_model_python(
                     upper_limits_arr if upper_limits_arr is not None else np.inf
                 ),
                 n_splits=0,
+                n_jobs=cores,
             )
             return est
 

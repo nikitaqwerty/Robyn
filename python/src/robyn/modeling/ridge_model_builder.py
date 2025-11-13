@@ -88,7 +88,7 @@ class RidgeModelBuilder:
 
         # Initialize optimizer
         optimizer = ng.optimizers.registry[nevergrad_algo.value](
-            instrum, budget=iterations, num_workers=1
+            instrum, budget=iterations, num_workers=cores
         )
         self.logger.debug(f"Initialized optimizer: {optimizer}")
 
@@ -124,7 +124,7 @@ class RidgeModelBuilder:
                             "tuple_size": len(
                                 hyper_collect["hyper_bound_list_updated"]
                             ),
-                            "num_workers": 1,  # Single worker
+                            "num_workers": cores,  # Single worker
                             "budget": iterations,
                         },
                         "objective": {
