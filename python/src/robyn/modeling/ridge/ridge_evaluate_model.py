@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import sys
 import time
 import warnings
 from datetime import datetime
@@ -81,8 +82,17 @@ class RidgeModelEvaluator:
         start_time = time.time()
         all_results = []
 
+        self.logger.info(
+            f"Starting trial {trial} of {total_trials} with {iterations} iterations"
+        )
+
         with tqdm(
-            total=iterations, desc=f"Running trial {trial} of {total_trials}"
+            total=iterations,
+            desc=f"Running trial {trial} of {total_trials}",
+            file=sys.stdout,
+            ncols=80,
+            mininterval=0.5,
+            disable=False,
         ) as pbar:
             for iter_ng in range(iterations):
                 candidate = optimizer.ask()
@@ -218,6 +228,14 @@ class RidgeModelEvaluator:
 
                 all_results.append(result)
                 pbar.update(1)
+
+                # Log progress at regular intervals
+                progress_pct = int((iter_ng + 1) / iterations * 100)
+                if (iter_ng + 1) % max(1, iterations // 10) == 0 or iter_ng == 0:
+                    self.logger.info(
+                        f"Trial {trial}: Progress {progress_pct}% ({iter_ng+1}/{iterations}) - "
+                        f"NRMSE: {result['nrmse']:.6f}, Loss: {result['loss']:.6f}"
+                    )
 
                 if iter_ng == 0 or iter_ng % 10 == 0:
                     self.logger.debug(
