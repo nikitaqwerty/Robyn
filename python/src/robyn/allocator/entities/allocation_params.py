@@ -1,14 +1,15 @@
 from dataclasses import dataclass
 from typing import List, Optional
+
 import numpy as np
 from robyn.allocator.constants import (
-    SCENARIO_MAX_RESPONSE,
-    SCENARIO_TARGET_EFFICIENCY,
     ALGO_SLSQP_AUGLAG,
     CONSTRAINT_MODE_EQ,
+    DATE_RANGE_ALL,
     DEFAULT_CONSTRAINT_MULTIPLIER,
     DEFAULT_MAX_EVAL,
-    DATE_RANGE_ALL,
+    SCENARIO_MAX_RESPONSE,
+    SCENARIO_TARGET_EFFICIENCY,
 )
 
 
@@ -29,6 +30,7 @@ class AllocatorParams:
         maxeval: Maximum number of evaluations
         constr_mode: Constraint mode ('eq' or 'ineq')
         plots: Whether to generate plots
+        include_scurve_carryover: Whether to include carryover response in S-curve total_response calculation
     """
 
     scenario: str
@@ -42,6 +44,7 @@ class AllocatorParams:
     maxeval: int = DEFAULT_MAX_EVAL
     constr_mode: str = CONSTRAINT_MODE_EQ
     plots: bool = True
+    include_scurve_carryover: bool = False
 
     def __post_init__(self):
         """Validate and process parameters after initialization."""

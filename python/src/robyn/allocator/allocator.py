@@ -1349,12 +1349,17 @@ class BudgetAllocator:
             )
             simulate_spend = np.linspace(0, max_x, 500)
 
+            # Choose carryover value based on flag
+            carryover_for_simulation = (
+                carryover_mean if self.params.include_scurve_carryover else 0
+            )
+
             simulate_response = self._fx_objective(
                 x=simulate_spend,
                 coeff=self.coefs_eval[channel],
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
-                x_hist_carryover=0,  # Zero carryover for simulating full response curve
+                x_hist_carryover=carryover_for_simulation,
                 theta=self.thetas[channel],  # Add theta parameter
                 get_sum=False,
             )
