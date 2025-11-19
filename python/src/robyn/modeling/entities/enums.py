@@ -1,4 +1,4 @@
-from enum import auto, Enum
+from enum import Enum, auto
 
 
 class NevergradAlgorithm(Enum):
@@ -20,6 +20,18 @@ class NevergradAlgorithm(Enum):
     NAIVE_TBPSA = "NaiveTBPSA"  # Naive TBPSA
     CGA = "CGA"  # Compact Genetic Algorithm
     RANDOM_SEARCH = "RandomSearch"  # Random Search
+
+
+class OptunaAlgorithm(Enum):
+    """
+    Enumeration of available Optuna sampling algorithms.
+    These algorithms are used in the hyperparameter optimization process.
+    """
+
+    TPE = "TPESampler"  # Tree-structured Parzen Estimator (supports multi-objective)
+    NSGAII = (
+        "NSGAIISampler"  # Non-dominated Sorting Genetic Algorithm II (multi-objective)
+    )
 
 
 class Models(Enum):

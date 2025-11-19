@@ -10,9 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import nevergrad as ng
 import numpy as np
+import optuna
 import pandas as pd
 from nevergrad.optimization.base import Optimizer
-from robyn.modeling.entities.enums import NevergradAlgorithm
+from robyn.modeling.entities.enums import NevergradAlgorithm, OptunaAlgorithm
 from robyn.modeling.entities.modeloutputs import Trial
 from robyn.modeling.ridge.models.ridge_utils import create_ridge_model_python
 from sklearn.exceptions import ConvergenceWarning
@@ -324,6 +325,300 @@ class RidgeModelEvaluator:
             lambda_max=pd.Series([float(best_result["lambda_max"])]),
             lambda_min_ratio=pd.Series([float(best_result["lambda_min_ratio"])]),
             pos=pd.Series([int(best_result.get("pos", 0))]),  # Cast to int
+            elapsed=pd.Series([float(best_result["elapsed"])]),
+            elapsed_accum=pd.Series([float(best_result["elapsed_accum"])]),
+            trial=pd.Series([int(trial)]),
+            iter_ng=pd.Series([int(best_result["iter_ng"])]),
+            iter_par=pd.Series([int(best_result["iter_par"])]),
+            train_size=pd.Series([float(best_result["params"].get("train_size", 1.0))]),
+            sol_id=str(best_result["params"]["sol_id"]),
+        )
+
+    def _run_optuna_optimization(
+        self,
+        study: optuna.Study,
+        hyper_collect: Dict[str, Any],
+        iterations: int,
+        cores: int,
+        optuna_algo: OptunaAlgorithm,
+        intercept: bool,
+        intercept_sign: str,
+        ts_validation: bool,
+        add_penalty_factor: bool,
+        objective_weights: Optional[List[float]],
+        dt_hyper_fixed: Optional[pd.DataFrame],
+        rssd_zero_penalty: bool,
+        trial: int,
+        seed: int,
+        total_trials: int,
+        val_size: int = 5,
+        test_size: int = 5,
+        fixed_coefficients: Optional[Dict[str, float]] = None,
+        fixed_intercept: Optional[float] = None,
+        cv_n_folds: Optional[int] = None,
+        cv_train_size: Optional[int] = None,
+        hp_opt_score_target: str = "nrmse_train",
+        observation_weights: Optional[np.ndarray] = None,
+        coefficient_lower_limits: Optional[Dict[str, float]] = None,
+        coefficient_upper_limits: Optional[Dict[str, float]] = None,
+        intercept_lower_limit: Optional[float] = None,
+        intercept_upper_limit: Optional[float] = None,
+    ) -> Trial:
+        """Run Optuna optimization for ridge regression with parallel sampling."""
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+        np.random.seed(seed)
+        random.seed(seed)
+        param_names = list(hyper_collect["hyper_bound_list_updated"].keys())
+
+        self.logger.debug(f"Starting optimization with {len(param_names)} parameters")
+        self.logger.debug(f"Parameter names: {param_names}")
+
+        start_time = time.time()
+        all_results = []
+        iteration_counter = {"count": 0}
+
+        # Create progress bar
+        pbar = tqdm(
+            total=iterations,
+            desc=f"Running trial {trial} of {total_trials}",
+            file=sys.stdout,
+            ncols=80,
+            mininterval=0.5,
+            disable=False,
+        )
+
+        self.logger.info(
+            f"Starting trial {trial} of {total_trials} with {iterations} iterations"
+        )
+
+        def objective(optuna_trial):
+            """Optuna objective function for a single evaluation."""
+            iter_ng = iteration_counter["count"]
+            iteration_counter["count"] += 1
+
+            # Sample parameters using Optuna's suggest API
+            transformed_params = {}
+            raw_values = []
+            for name in param_names:
+                bounds = hyper_collect["hyper_bound_list_updated"][name]
+                # Suggest a value in [0, 1] and transform it to the actual bounds
+                raw_value = optuna_trial.suggest_float(f"{name}_raw", 0.0, 1.0)
+                transformed_value = bounds[0] + raw_value * (bounds[1] - bounds[0])
+                transformed_params[name] = transformed_value
+                raw_values.append(raw_value)
+                self.logger.debug(
+                    f"Parameter {name}: raw={raw_value}, transformed={transformed_value}"
+                )
+
+            # Log sampled values
+            self.logger.debug(
+                json.dumps(
+                    {
+                        "step": f"step6_hyperparameter_sampling_iteration_{iter_ng + 1}",
+                        "data": {
+                            "iteration_info": {
+                                "current_iteration": iter_ng + 1,
+                                "total_iterations": iterations,
+                                "cores": cores,
+                            },
+                            "sampling": {
+                                "hyper_fixed": False,
+                                "num_samples": 1,
+                                "updated_params": {
+                                    "names": param_names,
+                                    "bounds": {
+                                        name: hyper_collect["hyper_bound_list_updated"][
+                                            name
+                                        ]
+                                        for name in param_names
+                                    },
+                                },
+                            },
+                            "results": {
+                                "sampled_values": [[round(v, 4) for v in raw_values]],
+                                "final_hyperparams": {
+                                    name: [round(transformed_params[name], 4)]
+                                    for name in param_names
+                                },
+                            },
+                        },
+                    },
+                    indent=2,
+                )
+            )
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                result = self._evaluate_model(
+                    transformed_params,
+                    ts_validation,
+                    add_penalty_factor,
+                    rssd_zero_penalty,
+                    objective_weights,
+                    start_time=start_time,
+                    iter_ng=iter_ng,
+                    total_iterations=iterations,
+                    cores=cores,
+                    trial=trial,
+                    intercept_sign=intercept_sign,
+                    intercept=intercept,
+                    val_size=val_size,
+                    test_size=test_size,
+                    fixed_coefficients=fixed_coefficients,
+                    fixed_intercept=fixed_intercept,
+                    cv_n_folds=cv_n_folds,
+                    cv_train_size=cv_train_size,
+                    hp_opt_score_target=hp_opt_score_target,
+                    observation_weights=observation_weights,
+                    coefficient_lower_limits=coefficient_lower_limits,
+                    coefficient_upper_limits=coefficient_upper_limits,
+                    intercept_lower_limit=intercept_lower_limit,
+                    intercept_upper_limit=intercept_upper_limit,
+                )
+
+            self.logger.debug(
+                f"Evaluation result - NRMSE: {result['nrmse']:.6f}, RSSD: {result.get('decomp_rssd', 0):.6f}"
+            )
+
+            # Store result for later aggregation
+            sol_id = f"{trial}_{iter_ng + 1}_1"
+            result["params"].update(
+                {
+                    "sol_id": sol_id,
+                    "ElapsedAccum": result["elapsed_accum"],
+                    "trial": int(trial),
+                    "rsq_train": float(result["rsq_train"]),
+                    "rsq_val": float(result["rsq_val"]),
+                    "rsq_test": float(result["rsq_test"]),
+                    "nrmse": float(result["nrmse"]),
+                    "nrmse_train": float(result["nrmse_train"]),
+                    "nrmse_val": float(result["nrmse_val"]),
+                    "nrmse_test": float(result["nrmse_test"]),
+                    "decomp.rssd": float(result["decomp_rssd"]),
+                    "mape": float(result["mape"]),
+                    "lambda": float(result["lambda"]),
+                    "lambda_hp": float(result["lambda_hp"]),
+                    "lambda_max": float(result["lambda_max"]),
+                    "lambda_min_ratio": float(result["lambda_min_ratio"]),
+                    "iterNG": int(iter_ng + 1),
+                    "iterPar": 1,
+                    "train_size": float(result["train_size"]),
+                }
+            )
+
+            all_results.append(result)
+            pbar.update(1)
+
+            # Log progress at regular intervals
+            progress_pct = int((iter_ng + 1) / iterations * 100)
+            if (iter_ng + 1) % max(1, iterations // 10) == 0 or iter_ng == 0:
+                self.logger.info(
+                    f"Trial {trial}: Progress {progress_pct}% ({iter_ng+1}/{iterations}) - "
+                    f"NRMSE: {result['nrmse']:.6f}, Loss: {result['loss']:.6f}"
+                )
+
+            if iter_ng == 0 or iter_ng % 10 == 0:
+                self.logger.debug(
+                    f"Iteration {iter_ng+1} results - NRMSE: {result['nrmse']:.6f}, RSSD: {result.get('decomp_rssd', 0):.6f}, Loss: {result['loss']:.6f}"
+                )
+                if "mae_val" in result:
+                    self.logger.debug(f"MAE: {result['mae_val']:.6f}")
+
+            # Return tuple for multi-objective optimization
+            if self.calibration_input is not None:
+                return (result["nrmse"], result["decomp_rssd"], result["mape"])
+            else:
+                return (result["nrmse"], result["decomp_rssd"])
+
+        # Run optimization with parallel sampling
+        try:
+            study.optimize(
+                objective,
+                n_trials=iterations,
+                n_jobs=cores if cores and cores > 1 else 1,
+                show_progress_bar=False,  # We use our own progress bar
+            )
+        finally:
+            pbar.close()
+
+        end_time = time.time()
+        self.logger.info(f" Finished in {(end_time - start_time) / 60:.2f} mins")
+
+        # Aggregate results with explicit dtypes
+        result_hyp_param = pd.DataFrame([r["params"] for r in all_results]).astype(
+            {
+                "sol_id": "str",
+                "trial": "int64",
+                "iterNG": "int64",
+                "iterPar": "int64",
+                "nrmse": "float64",
+                "decomp.rssd": "float64",
+                "mape": "float64",
+                "lambda": "float64",
+                "lambda_hp": "float64",
+                "lambda_max": "float64",
+                "lambda_min_ratio": "float64",
+                "rsq_train": "float64",
+                "rsq_val": "float64",
+                "rsq_test": "float64",
+                "train_size": "float64",
+            }
+        )
+
+        # Add the MAE and MAPE metrics to the hyper_param DataFrame
+        if "mae_val" in all_results[0]:
+            result_hyp_param["mae_val"] = [float(r["mae_val"]) for r in all_results]
+        if "mape_val" in all_results[0]:
+            result_hyp_param["mape_val"] = [float(r["mape_val"]) for r in all_results]
+
+        decomp_spend_dist = pd.concat(
+            [r["decomp_spend_dist"] for r in all_results], ignore_index=True
+        )
+        x_decomp_agg = pd.concat(
+            [r["x_decomp_agg"] for r in all_results], ignore_index=True
+        )
+
+        # Find best result based on loss
+        best_result = min(all_results, key=lambda x: x["loss"])
+        recommendation = best_result["params"]
+        self.logger.debug(
+            f"=== Optimization Complete (Trial {trial}/{total_trials}) ==="
+        )
+        self.logger.debug(f"Best parameters: {recommendation}")
+
+        # For multi-objective optimization, we can't use study.best_trial directly
+        # Instead, log the best result from our custom loss calculation
+        self.logger.debug(f"Best iteration: {best_result['iter_ng']}")
+        self.logger.debug(f"Best loss: {best_result['loss']:.6f}")
+
+        # Log MAE in debug output
+        if "mae_val" in best_result:
+            self.logger.debug(
+                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}, MAE={best_result['mae_val']:.6f}"
+            )
+        else:
+            self.logger.debug(
+                f"Final performance: NRMSE={best_result['nrmse']:.6f}, RSSD={best_result.get('decomp_rssd', 0):.6f}"
+            )
+
+        return Trial(
+            result_hyp_param=result_hyp_param,
+            lift_calibration=best_result.get("lift_calibration", pd.DataFrame()),
+            decomp_spend_dist=decomp_spend_dist,
+            x_decomp_agg=x_decomp_agg,
+            nrmse=pd.Series([float(best_result["nrmse"])]),
+            decomp_rssd=pd.Series([float(best_result["decomp_rssd"])]),
+            mape=pd.Series([int(best_result["mape"])]),
+            rsq_train=pd.Series([float(best_result["rsq_train"])]),
+            rsq_val=pd.Series([float(best_result["rsq_val"])]),
+            rsq_test=pd.Series([float(best_result["rsq_test"])]),
+            lambda_=pd.Series([float(best_result["lambda"])]),
+            lambda_hp=pd.Series([float(best_result["lambda_hp"])]),
+            lambda_max=pd.Series([float(best_result["lambda_max"])]),
+            lambda_min_ratio=pd.Series([float(best_result["lambda_min_ratio"])]),
+            pos=pd.Series([int(best_result.get("pos", 0))]),
             elapsed=pd.Series([float(best_result["elapsed"])]),
             elapsed_accum=pd.Series([float(best_result["elapsed_accum"])]),
             trial=pd.Series([int(trial)]),

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from robyn.common.common_util import CommonUtils
 from robyn.modeling.base_model_executor import BaseModelExecutor
-from robyn.modeling.entities.enums import Models, NevergradAlgorithm
+from robyn.modeling.entities.enums import Models, NevergradAlgorithm, OptunaAlgorithm
 from robyn.modeling.entities.modeloutputs import ModelOutputs
 from robyn.modeling.entities.modelrun_trials_config import TrialsConfig
 from robyn.modeling.ridge_model_builder import RidgeModelBuilder
@@ -40,7 +40,8 @@ class ModelExecutor(BaseModelExecutor):
         trials_config: Optional[TrialsConfig] = None,
         rssd_zero_penalty: bool = True,
         objective_weights: Optional[Dict[str, float]] = None,
-        nevergrad_algo: NevergradAlgorithm = NevergradAlgorithm.TWO_POINTS_DE,
+        nevergrad_algo: Optional[NevergradAlgorithm] = None,
+        optuna_algo: Optional[OptunaAlgorithm] = OptunaAlgorithm.TPE,
         intercept: bool = True,
         intercept_sign: str = "non_negative",
         outputs: bool = False,
@@ -52,7 +53,7 @@ class ModelExecutor(BaseModelExecutor):
             Dict[str, float]
         ] = None,  # New parameter for fixed coefficients
         fixed_intercept: Optional[float] = None,  # New parameter for fixed intercept
-        reinit_nevergrad_between_trials: bool = False,
+        reinit_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
@@ -68,6 +69,16 @@ class ModelExecutor(BaseModelExecutor):
         Execute the Robyn model run with specified parameters.
 
         Args:
+            nevergrad_algo: Optional Nevergrad algorithm to use. If specified, uses Nevergrad
+                           for optimization. If None (default), uses Optuna.
+            optuna_algo: Optuna algorithm to use (TPE or CMAES). Only used if nevergrad_algo
+                        is None. Default is TPE (Tree-structured Parzen Estimator).
+            cores: Number of CPU cores to use for parallel trial and optimization execution.
+                  If None (default), uses all available CPU cores. Trials are parallelized
+                  when multiple trials and cores are available, with cores distributed across
+                  trials. Optuna and Nevergrad both support parallelization.
+            reinit_between_trials: Whether to reinitialize the optimizer between trials.
+                                  False (default) reuses optimization knowledge across trials.
             fixed_coefficients: Dictionary mapping feature names to fixed coefficient values.
                                 Features not included will be fitted normally.
             fixed_intercept: Fixed value for the intercept. If provided, the intercept
@@ -138,6 +149,15 @@ class ModelExecutor(BaseModelExecutor):
                 )
 
                 self.logger.info("Building models with configured parameters")
+
+                # Log optimizer choice
+                if nevergrad_algo is not None:
+                    self.logger.info(
+                        f"Using Nevergrad optimizer: {nevergrad_algo.value}"
+                    )
+                else:
+                    self.logger.info(f"Using Optuna optimizer: {optuna_algo.value}")
+
                 model_outputs = model_builder.build_models(
                     trials_config=trials_config,
                     dt_hyper_fixed=dt_hyper_fixed,
@@ -147,6 +167,7 @@ class ModelExecutor(BaseModelExecutor):
                     rssd_zero_penalty=rssd_zero_penalty,
                     objective_weights=objective_weights,
                     nevergrad_algo=nevergrad_algo,
+                    optuna_algo=optuna_algo,
                     intercept=intercept,
                     intercept_sign=intercept_sign,
                     cores=cores,
@@ -154,7 +175,7 @@ class ModelExecutor(BaseModelExecutor):
                     test_size=test_size,
                     fixed_coefficients=fixed_coefficients,
                     fixed_intercept=fixed_intercept,
-                    reinit_nevergrad_between_trials=reinit_nevergrad_between_trials,
+                    reinit_between_trials=reinit_between_trials,
                     cv_n_folds=cv_n_folds,
                     cv_train_size=cv_train_size,
                     hp_opt_score_target=hp_opt_score_target,
