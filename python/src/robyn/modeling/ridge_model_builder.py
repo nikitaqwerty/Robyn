@@ -2,8 +2,10 @@
 
 import json
 import logging
+import os
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -143,6 +145,78 @@ class RidgeModelBuilder:
 
         return optimizer, objective_weights
 
+    def _run_single_trial(
+        self,
+        trial: int,
+        hyper_collect: Dict[str, Any],
+        iterations: int,
+        cores: int,
+        nevergrad_algo: NevergradAlgorithm,
+        intercept: bool,
+        intercept_sign: str,
+        ts_validation: bool,
+        add_penalty_factor: bool,
+        dt_hyper_fixed: Optional[pd.DataFrame],
+        rssd_zero_penalty: bool,
+        total_trials: int,
+        seed: int,
+        val_size: int,
+        test_size: int,
+        fixed_coefficients: Optional[Dict[str, float]],
+        fixed_intercept: Optional[float],
+        cv_n_folds: Optional[int],
+        cv_train_size: Optional[int],
+        hp_opt_score_target: str,
+        observation_weights: Optional[np.ndarray],
+        coefficient_lower_limits: Optional[Dict[str, float]],
+        coefficient_upper_limits: Optional[Dict[str, float]],
+        intercept_lower_limit: Optional[float],
+        intercept_upper_limit: Optional[float],
+        calibration_input: Optional[Any],
+        objective_weights: Optional[List[float]],
+    ) -> Trial:
+        """Run a single trial optimization"""
+        # Always reinitialize optimizer for each trial (default behavior)
+        optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
+            hyper_collect=hyper_collect,
+            iterations=iterations,
+            cores=cores,
+            nevergrad_algo=nevergrad_algo,
+            calibration_input=calibration_input,
+            objective_weights=objective_weights,
+        )
+
+        trial_result = self.ridge_model_evaluator._run_nevergrad_optimization(
+            optimizer=optimizer,
+            hyper_collect=hyper_collect,
+            iterations=iterations,
+            cores=cores,
+            nevergrad_algo=nevergrad_algo,
+            intercept=intercept,
+            intercept_sign=intercept_sign,
+            ts_validation=ts_validation,
+            add_penalty_factor=add_penalty_factor,
+            objective_weights=objective_weights_eff,
+            dt_hyper_fixed=dt_hyper_fixed,
+            rssd_zero_penalty=rssd_zero_penalty,
+            trial=trial,
+            seed=seed,
+            total_trials=total_trials,
+            val_size=val_size,
+            test_size=test_size,
+            fixed_coefficients=fixed_coefficients,
+            fixed_intercept=fixed_intercept,
+            cv_n_folds=cv_n_folds,
+            cv_train_size=cv_train_size,
+            hp_opt_score_target=hp_opt_score_target,
+            observation_weights=observation_weights,
+            coefficient_lower_limits=coefficient_lower_limits,
+            coefficient_upper_limits=coefficient_upper_limits,
+            intercept_lower_limit=intercept_lower_limit,
+            intercept_upper_limit=intercept_upper_limit,
+        )
+        return trial_result
+
     def build_models(
         self,
         trials_config: TrialsConfig,
@@ -160,7 +234,6 @@ class RidgeModelBuilder:
         test_size: int = 5,
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
-        reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
@@ -172,6 +245,10 @@ class RidgeModelBuilder:
     ) -> ModelOutputs:
         start_time = time.time()
 
+        # Set default cores to all available CPUs
+        if cores is None:
+            cores = os.cpu_count() or 1
+
         # Initialize hyperparameters with flattened structure
         hyper_collect = self.ridge_data_builder._hyper_collector(
             self.hyperparameters,
@@ -181,63 +258,68 @@ class RidgeModelBuilder:
             cores,
         )
 
-        # Initialize Nevergrad optimizer once if not reinitializing between trials
-        optimizer = None
-        objective_weights_eff = None
-        if not reinit_nevergrad_between_trials:
-            optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
-                hyper_collect=hyper_collect,
-                iterations=trials_config.iterations,
-                cores=cores,
-                nevergrad_algo=nevergrad_algo,
-                calibration_input=self.calibration_input,
-                objective_weights=objective_weights,
-            )
-
-        # Run trials
+        # Run trials in parallel
         trials = []
-        for trial in range(1, trials_config.trials + 1):
-            # Reinitialize optimizer for each trial if requested
-            if reinit_nevergrad_between_trials:
-                optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
+        max_workers = min(cores, trials_config.trials)
+
+        self.logger.info(
+            f"Running {trials_config.trials} trials in parallel using {max_workers} workers"
+        )
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all trial jobs
+            future_to_trial = {}
+            for trial in range(1, trials_config.trials + 1):
+                future = executor.submit(
+                    self._run_single_trial,
+                    trial=trial,
                     hyper_collect=hyper_collect,
                     iterations=trials_config.iterations,
                     cores=cores,
                     nevergrad_algo=nevergrad_algo,
+                    intercept=intercept,
+                    intercept_sign=intercept_sign,
+                    ts_validation=ts_validation,
+                    add_penalty_factor=add_penalty_factor,
+                    dt_hyper_fixed=dt_hyper_fixed,
+                    rssd_zero_penalty=rssd_zero_penalty,
+                    total_trials=trials_config.trials,
+                    seed=seed[0] + trial,
+                    val_size=val_size,
+                    test_size=test_size,
+                    fixed_coefficients=fixed_coefficients,
+                    fixed_intercept=fixed_intercept,
+                    cv_n_folds=cv_n_folds,
+                    cv_train_size=cv_train_size,
+                    hp_opt_score_target=hp_opt_score_target,
+                    observation_weights=observation_weights,
+                    coefficient_lower_limits=coefficient_lower_limits,
+                    coefficient_upper_limits=coefficient_upper_limits,
+                    intercept_lower_limit=intercept_lower_limit,
+                    intercept_upper_limit=intercept_upper_limit,
                     calibration_input=self.calibration_input,
                     objective_weights=objective_weights,
                 )
+                future_to_trial[future] = trial
 
-            trial_result = self.ridge_model_evaluator._run_nevergrad_optimization(
-                optimizer=optimizer,
-                hyper_collect=hyper_collect,
-                iterations=trials_config.iterations,
-                cores=cores,
-                nevergrad_algo=nevergrad_algo,
-                intercept=intercept,
-                intercept_sign=intercept_sign,
-                ts_validation=ts_validation,
-                add_penalty_factor=add_penalty_factor,
-                objective_weights=objective_weights_eff,
-                dt_hyper_fixed=dt_hyper_fixed,
-                rssd_zero_penalty=rssd_zero_penalty,
-                trial=trial,
-                seed=seed[0] + trial,
-                total_trials=trials_config.trials,
-                val_size=val_size,
-                test_size=test_size,
-                fixed_coefficients=fixed_coefficients,
-                fixed_intercept=fixed_intercept,
-                cv_n_folds=cv_n_folds,
-                cv_train_size=cv_train_size,
-                hp_opt_score_target=hp_opt_score_target,
-                observation_weights=observation_weights,
-                coefficient_lower_limits=coefficient_lower_limits,
-                coefficient_upper_limits=coefficient_upper_limits,
-                intercept_lower_limit=intercept_lower_limit,
-                intercept_upper_limit=intercept_upper_limit,
-            )
-            trials.append(trial_result)
+            # Collect results as they complete
+            trial_results = {}
+            with tqdm(total=trials_config.trials, desc="Running trials") as pbar:
+                for future in as_completed(future_to_trial):
+                    trial_num = future_to_trial[future]
+                    try:
+                        trial_result = future.result()
+                        trial_results[trial_num] = trial_result
+                        pbar.update(1)
+                    except Exception as exc:
+                        self.logger.error(
+                            f"Trial {trial_num} generated an exception: {exc}"
+                        )
+                        raise
+
+            # Sort results by trial number to maintain order
+            for trial_num in sorted(trial_results.keys()):
+                trials.append(trial_results[trial_num])
         # Calculate convergence
         convergence = Convergence()
         convergence_results = convergence.calculate_convergence(trials)

@@ -138,6 +138,8 @@ class ModelExecutor(BaseModelExecutor):
                 )
 
                 self.logger.info("Building models with configured parameters")
+                # Note: reinit_nevergrad_between_trials is kept in model_run() signature
+                # for backward compatibility but is no longer used (reinitialization is now default)
                 model_outputs = model_builder.build_models(
                     trials_config=trials_config,
                     dt_hyper_fixed=dt_hyper_fixed,
@@ -154,7 +156,6 @@ class ModelExecutor(BaseModelExecutor):
                     test_size=test_size,
                     fixed_coefficients=fixed_coefficients,
                     fixed_intercept=fixed_intercept,
-                    reinit_nevergrad_between_trials=reinit_nevergrad_between_trials,
                     cv_n_folds=cv_n_folds,
                     cv_train_size=cv_train_size,
                     hp_opt_score_target=hp_opt_score_target,
