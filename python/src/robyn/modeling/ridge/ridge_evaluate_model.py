@@ -68,12 +68,21 @@ class RidgeModelEvaluator:
         intercept_lower_limit: Optional[float] = None,
         intercept_upper_limit: Optional[float] = None,
     ) -> Trial:
-        """Run Nevergrad optimization for ridge regression."""
+        """Run Nevergrad optimization for ridge regression.
+
+        Note: The seed is used to ensure reproducibility across all random operations:
+        - numpy random operations (np.random.seed)
+        - Python's random module (random.seed)
+        - The Nevergrad optimizer's random state (seeded when optimizer is created)
+        """
         warnings.filterwarnings("ignore", category=ConvergenceWarning)
         warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+        # Set seeds for reproducibility of all downstream random operations
         np.random.seed(seed)
         random.seed(seed)
+        self.logger.info(f"Set random seeds to {seed} for trial {trial}")
+
         param_names = list(hyper_collect["hyper_bound_list_updated"].keys())
 
         self.logger.debug(f"Starting optimization with {len(param_names)} parameters")

@@ -71,8 +71,14 @@ class RidgeModelBuilder:
         nevergrad_algo: NevergradAlgorithm,
         calibration_input: Optional[Any] = None,
         objective_weights: Optional[List[float]] = None,
+        seed: Optional[int] = None,
     ) -> Tuple[Optimizer, List[float]]:
-        """Initialize Nevergrad optimizer exactly like R's implementation"""
+        """Initialize Nevergrad optimizer exactly like R's implementation
+
+        Args:
+            seed: Random seed for reproducibility. If provided, will be used to seed
+                  the optimizer's random state for consistent behavior across runs.
+        """
 
         # Get number of hyperparameters
         hyper_count = len(hyper_collect["hyper_bound_list_updated"])
@@ -84,6 +90,12 @@ class RidgeModelBuilder:
 
         # Create instrumentation
         instrum = ng.p.Array(shape=shape_tuple, lower=0, upper=1)
+
+        # Seed the instrumentation's random state if seed is provided
+        if seed is not None:
+            instrum.random_state.seed(seed)
+            self.logger.debug(f"Seeded instrumentation random state with seed: {seed}")
+
         self.logger.debug(f"Created instrumentation: {instrum}")
 
         # Initialize optimizer
@@ -183,7 +195,10 @@ class RidgeModelBuilder:
         # Run trials
         trials = []
         for trial in range(1, trials_config.trials + 1):
-            # Reinitialize optimizer for each trial
+            # Calculate seed for this trial
+            trial_seed = seed[0] + trial
+
+            # Reinitialize optimizer for each trial with proper seed
             optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
                 hyper_collect=hyper_collect,
                 iterations=trials_config.iterations,
@@ -191,6 +206,7 @@ class RidgeModelBuilder:
                 nevergrad_algo=nevergrad_algo,
                 calibration_input=self.calibration_input,
                 objective_weights=objective_weights,
+                seed=trial_seed,  # Pass seed to properly initialize optimizer's random state
             )
 
             trial_result = self.ridge_model_evaluator._run_nevergrad_optimization(
@@ -207,7 +223,7 @@ class RidgeModelBuilder:
                 dt_hyper_fixed=dt_hyper_fixed,
                 rssd_zero_penalty=rssd_zero_penalty,
                 trial=trial,
-                seed=seed[0] + trial,
+                seed=trial_seed,  # Also pass to evaluation for downstream processes
                 total_trials=trials_config.trials,
                 val_size=val_size,
                 test_size=test_size,
