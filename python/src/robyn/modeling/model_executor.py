@@ -52,7 +52,6 @@ class ModelExecutor(BaseModelExecutor):
             Dict[str, float]
         ] = None,  # New parameter for fixed coefficients
         fixed_intercept: Optional[float] = None,  # New parameter for fixed intercept
-        reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,  # New parameter for fixed CV training size
         hp_opt_score_target: str = "nrmse_train",  # New parameter for HP optimization target metric
@@ -154,7 +153,6 @@ class ModelExecutor(BaseModelExecutor):
                     test_size=test_size,
                     fixed_coefficients=fixed_coefficients,
                     fixed_intercept=fixed_intercept,
-                    reinit_nevergrad_between_trials=reinit_nevergrad_between_trials,
                     cv_n_folds=cv_n_folds,
                     cv_train_size=cv_train_size,
                     hp_opt_score_target=hp_opt_score_target,

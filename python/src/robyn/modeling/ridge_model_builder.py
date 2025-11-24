@@ -160,7 +160,6 @@ class RidgeModelBuilder:
         test_size: int = 5,
         fixed_coefficients: Optional[Dict[str, float]] = None,
         fixed_intercept: Optional[float] = None,
-        reinit_nevergrad_between_trials: bool = False,
         cv_n_folds: Optional[int] = None,
         cv_train_size: Optional[int] = None,
         hp_opt_score_target: str = "nrmse_train",
@@ -181,10 +180,10 @@ class RidgeModelBuilder:
             cores,
         )
 
-        # Initialize Nevergrad optimizer once if not reinitializing between trials
-        optimizer = None
-        objective_weights_eff = None
-        if not reinit_nevergrad_between_trials:
+        # Run trials
+        trials = []
+        for trial in range(1, trials_config.trials + 1):
+            # Reinitialize optimizer for each trial
             optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
                 hyper_collect=hyper_collect,
                 iterations=trials_config.iterations,
@@ -193,20 +192,6 @@ class RidgeModelBuilder:
                 calibration_input=self.calibration_input,
                 objective_weights=objective_weights,
             )
-
-        # Run trials
-        trials = []
-        for trial in range(1, trials_config.trials + 1):
-            # Reinitialize optimizer for each trial if requested
-            if reinit_nevergrad_between_trials:
-                optimizer, objective_weights_eff = self.initialize_nevergrad_optimizer(
-                    hyper_collect=hyper_collect,
-                    iterations=trials_config.iterations,
-                    cores=cores,
-                    nevergrad_algo=nevergrad_algo,
-                    calibration_input=self.calibration_input,
-                    objective_weights=objective_weights,
-                )
 
             trial_result = self.ridge_model_evaluator._run_nevergrad_optimization(
                 optimizer=optimizer,
