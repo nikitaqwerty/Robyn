@@ -358,10 +358,11 @@ class BudgetAllocator:
             ],  # Keep suffixes
         )
 
-        # Get adstocked media data
-        chn_adstocked = (
+        # Get raw spend data and apply adstock transformation
+        # This ensures inflexion is calculated in same units as allocation spend
+        chn_adstocked_spend = (
             self.pareto_result.media_vec_collect[
-                (self.pareto_result.media_vec_collect["type"] == "adstockedMedia")
+                (self.pareto_result.media_vec_collect["type"] == "rawSpend")
                 & (self.pareto_result.media_vec_collect["sol_id"] == self.select_model)
             ][self.media_spend_sorted]
         ).iloc[
@@ -369,13 +370,31 @@ class BudgetAllocator:
             + 1
         ]
 
-        # Calculate inflexions (with suffixes to match gammas)
+        # Apply adstock transformation to spend data
+        theta_params_cols = [
+            col for col in self.dt_hyppar.columns if col.endswith("_thetas")
+        ]
+        theta_hyp_par = self.dt_hyppar[theta_params_cols].iloc[0]
+
+        chn_adstocked = {}
+        for media in self.media_spend_sorted:
+            spend_data = chn_adstocked_spend[media].values
+            theta = theta_hyp_par[f"{media}_thetas"]
+
+            # Apply geometric adstock
+            adstocked = np.zeros_like(spend_data, dtype=float)
+            adstocked[0] = spend_data[0]
+            for i in range(1, len(spend_data)):
+                adstocked[i] = spend_data[i] + theta * adstocked[i - 1]
+
+            chn_adstocked[media] = adstocked
+
+        # Calculate inflexions
         inflexions = pd.Series(
             index=[f"{media}_gammas" for media in self.media_spend_sorted], dtype=float
         )
         for i, media in enumerate(self.media_spend_sorted):
-            # Get max value from adstocked media
-            max_value = chn_adstocked[media].max()
+            max_value = np.max(chn_adstocked[media])
             gamma = gammas[f"{media}_gammas"]
             inflexions[f"{media}_gammas"] = max_value * gamma
 
@@ -468,23 +487,41 @@ class BudgetAllocator:
         alpha: float,
         inflexion: float,
         x_hist_carryover: Union[float, np.ndarray],
-        theta: float,  # Add theta parameter for proper adstocking
+        theta: float,
         get_sum: bool = True,
+        is_simulation: bool = False,
     ) -> float:
-        """Calculate objective function value using proper adstock and Hill transformation."""
+        """Calculate objective function value using proper adstock and Hill transformation.
+
+        Args:
+            x: Spend value(s)
+            coeff: Model coefficient
+            alpha: Hill curve alpha parameter
+            inflexion: Hill curve inflexion point
+            x_hist_carryover: Historical carryover effect
+            theta: Adstock theta parameter
+            get_sum: Whether to sum the output
+            is_simulation: If True, treats x as independent scenarios (for S-curve),
+                          If False, treats x as time series (for optimization)
+        """
         # Convert to numpy arrays
         x_array = np.array([x]) if isinstance(x, (int, float)) else np.array(x)
 
-        # Apply geometric adstock (same as training phase)
-        x_decayed = np.zeros_like(x_array)
-        x_decayed[0] = x_array[0]
+        if is_simulation:
+            # For S-curve simulation: each point is an independent scenario
+            # No recursive adstock across array elements
+            x_adstocked = x_array + x_hist_carryover
+        else:
+            # For optimization: apply recursive geometric adstock (time series)
+            x_decayed = np.zeros_like(x_array)
+            x_decayed[0] = x_array[0]
 
-        # Apply recursive geometric adstock
-        for i in range(1, len(x_array)):
-            x_decayed[i] = x_array[i] + theta * x_decayed[i - 1]
+            # Apply recursive geometric adstock
+            for i in range(1, len(x_array)):
+                x_decayed[i] = x_array[i] + theta * x_decayed[i - 1]
 
-        # Add historical carryover effect as initial condition
-        x_adstocked = x_decayed + x_hist_carryover
+            # Add historical carryover effect as initial condition
+            x_adstocked = x_decayed + x_hist_carryover
 
         # Hill transformation matching training code
         numerator = x_adstocked**alpha
@@ -1344,10 +1381,10 @@ class BudgetAllocator:
                 dt_optim_out_scurve[dt_optim_out_scurve["channels"] == channel][
                     "spend"
                 ].max()
-                * 10,
-                50_000_000,
+                * 5,
+                10_000_000,
             )
-            simulate_spend = np.linspace(0, max_x, 500)
+            simulate_spend = np.linspace(0, max_x, 10000)
 
             # Choose carryover value based on flag
             carryover_for_simulation = (
@@ -1360,8 +1397,9 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=carryover_for_simulation,
-                theta=self.thetas[channel],  # Add theta parameter
+                theta=self.thetas[channel],
                 get_sum=False,
+                is_simulation=True,
             )
 
             simulate_response_carryover = self._fx_objective(
@@ -1370,8 +1408,9 @@ class BudgetAllocator:
                 alpha=self.alphas_eval[f"{channel}_alphas"],
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=0,
-                theta=self.thetas[channel],  # Add theta parameter
+                theta=self.thetas[channel],
                 get_sum=False,
+                is_simulation=True,
             )
 
             # Create arrays of consistent length
