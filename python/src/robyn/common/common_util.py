@@ -1,9 +1,9 @@
 # pyre-strict
 
 import logging
-
-from typing import Optional
 import multiprocessing
+from typing import Optional
+
 from typing_extensions import Final
 
 
@@ -46,7 +46,7 @@ class CommonUtils:
 
         # Log warning if requested cores exceed available cores
         if requested_cores > available_cores:
-            logger.warning(
+            logger.info(
                 "Requested cores (%d) exceeds available cores (%d). Will use %d cores.",
                 requested_cores,
                 available_cores,
