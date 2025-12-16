@@ -1,11 +1,9 @@
 # pyre-strict
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Union
 
-import numpy as np
 import pandas as pd
+import numpy as np
 from robyn.common.logger import RobynLogger
 from robyn.data.entities.enums import AdstockType, DependentVarType
 from robyn.data.entities.holidays_data import HolidaysData
@@ -42,8 +40,12 @@ class PlotDataGenerator:
     ) -> Dict[str, pd.DataFrame]:
         """
         Prepare data for various plots used in the Pareto analysis.
-        Optimized version using parallel processing and batch concatenation.
         """
+        mediaVecCollect = pd.DataFrame()
+        xDecompVecCollect = pd.DataFrame()
+        plotDataCollect = {}
+        df_caov_pct_all = pd.DataFrame()
+
         xDecompAgg = pareto_data.x_decomp_agg
         dt_mod = self.featurized_mmm_data.dt_mod
         dt_modRollWind = self.featurized_mmm_data.dt_modRollWind
@@ -56,16 +58,6 @@ class PlotDataGenerator:
         )
 
         pareto_fronts_vec = pareto_data.pareto_fronts
-
-        # Collect all results first, then concatenate at the end
-        all_mediaVecCollect = []
-        all_xDecompVecCollect = []
-        plotDataCollect = {}
-        all_df_caov_pct = []
-
-        # Determine number of workers (use all available cores)
-        max_workers = os.cpu_count() or 1
-        self.logger.info(f"Using {max_workers} workers for parallel processing")
 
         for pf in pareto_fronts_vec:
             self.logger.info(f"Processing Pareto front {pf}")
@@ -80,12 +72,9 @@ class PlotDataGenerator:
 
             self.logger.info(f"Pareto-Front: {pf} [{len(uniqueSol)} models]")
 
-            # Process solutions in parallel
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all tasks
-                future_to_sid = {
-                    executor.submit(
-                        self._process_single_solution,
+            for sid in tqdm(uniqueSol, desc="Processing Solutions", unit="solution"):
+                try:
+                    plot_results = self._process_single_solution(
                         sid,
                         plotMediaShare,
                         plotWaterfall,
@@ -95,48 +84,24 @@ class PlotDataGenerator:
                         dt_modRollWind,
                         rw_start_loc,
                         rw_end_loc,
-                    ): sid
-                    for sid in uniqueSol
-                }
+                    )
 
-                # Process completed tasks with progress bar
-                for future in tqdm(
-                    as_completed(future_to_sid),
-                    total=len(uniqueSol),
-                    desc="Processing Solutions",
-                    unit="solution",
-                ):
-                    sid = future_to_sid[future]
-                    try:
-                        plot_results = future.result()
+                    mediaVecCollect = pd.concat(
+                        [mediaVecCollect, plot_results["mediaVecCollect"]],
+                        ignore_index=True,
+                    )
+                    xDecompVecCollect = pd.concat(
+                        [xDecompVecCollect, plot_results["xDecompVec"]],
+                        ignore_index=True,
+                    )
+                    plotDataCollect[sid] = plot_results["plotData"]
+                    df_caov_pct_all = pd.concat(
+                        [df_caov_pct_all, plot_results["plot7data"]]
+                    )
 
-                        # Collect results in lists instead of concatenating immediately
-                        all_mediaVecCollect.append(plot_results["mediaVecCollect"])
-                        all_xDecompVecCollect.append(plot_results["xDecompVec"])
-                        plotDataCollect[sid] = plot_results["plotData"]
-                        all_df_caov_pct.append(plot_results["plot7data"])
-
-                    except Exception as e:
-                        self.logger.error(f"Error processing solution {sid}: {str(e)}")
-                        raise e
-
-        # Concatenate all results at once (much more efficient)
-        self.logger.info("Concatenating all results...")
-        mediaVecCollect = (
-            pd.concat(all_mediaVecCollect, ignore_index=True)
-            if all_mediaVecCollect
-            else pd.DataFrame()
-        )
-        xDecompVecCollect = (
-            pd.concat(all_xDecompVecCollect, ignore_index=True)
-            if all_xDecompVecCollect
-            else pd.DataFrame()
-        )
-        df_caov_pct_all = (
-            pd.concat(all_df_caov_pct, ignore_index=True)
-            if all_df_caov_pct
-            else pd.DataFrame()
-        )
+                except Exception as e:
+                    self.logger.error(f"Error processing solution {sid}: {str(e)}")
+                    raise e
 
         pareto_solutions = set()
         if "sol_id" in xDecompVecCollect.columns:
