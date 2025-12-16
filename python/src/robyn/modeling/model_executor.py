@@ -119,7 +119,7 @@ class ModelExecutor(BaseModelExecutor):
             )
 
             cores = CommonUtils.get_cores_available(cores)
-            self.logger.debug("Using %d cores for processing", cores)
+            self.logger.info("Using %d cores for processing", cores)
 
             prepared_hyperparameters = self._prepare_hyperparameters(
                 dt_hyper_fixed, add_penalty_factor, ts_validation
