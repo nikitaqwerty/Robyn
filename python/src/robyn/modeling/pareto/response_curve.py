@@ -1,10 +1,10 @@
 # pyre-strict
 
-import logging
+from functools import partial
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 from dataclasses import dataclass
 from enum import Enum
-from functools import partial
 from typing import Dict, Literal, Optional, Union
 
 import numpy as np
@@ -605,120 +605,6 @@ class ResponseCurveCalculator:
             )
             return None
 
-    def _prepare_cached_data(self, paretoData: ParetoData) -> Dict:
-        """
-        Pre-cache hyperparameters and coefficients by sol_id to avoid repeated DataFrame filtering.
-
-        Args:
-            paretoData (ParetoData): Pareto data.
-
-        Returns:
-            Dict: Dictionary with cached data grouped by sol_id.
-        """
-        cached_data = {}
-
-        # Group hyperparameters by sol_id
-        for sol_id in paretoData.decomp_spend_dist["sol_id"].unique():
-            cached_data[sol_id] = {
-                "dt_hyppar": paretoData.result_hyp_param[
-                    paretoData.result_hyp_param["sol_id"] == sol_id
-                ].iloc[
-                    0:1
-                ],  # Keep as single-row DataFrame
-                "dt_coef": {},  # Will store coefficients per channel
-            }
-
-            # Pre-filter coefficients for this sol_id
-            sol_coef = paretoData.x_decomp_agg[
-                paretoData.x_decomp_agg["sol_id"] == sol_id
-            ]
-
-            # Store coefficients by channel name for faster lookup
-            for _, coef_row in sol_coef.iterrows():
-                rn = coef_row["rn"]
-                cached_data[sol_id]["dt_coef"][rn] = coef_row[["rn", "coef"]]
-
-        return cached_data
-
-    def run_dt_resp_optimized(
-        self, row: pd.Series, paretoData: ParetoData, cached_data: Dict
-    ) -> pd.Series:
-        """
-        Optimized version of run_dt_resp that uses pre-cached data.
-
-        Args:
-            row (pd.Series): A row of Pareto data.
-            paretoData (ParetoData): Pareto data.
-            cached_data (Dict): Pre-cached hyperparameters and coefficients.
-
-        Returns:
-            pd.Series: A pandas series containing the row of response curves.
-        """
-        try:
-            get_sol_id = row["sol_id"]
-            get_spendname = row["rn"]
-            startRW = self.mmm_data.mmmdata_spec.rolling_window_start_which
-            endRW = self.mmm_data.mmmdata_spec.rolling_window_end_which
-
-            # Use cached data instead of repeated DataFrame filtering
-            sol_cache = cached_data[get_sol_id]
-            dt_hyppar = sol_cache["dt_hyppar"]
-
-            response_output: ResponseOutput = self.calculate_response(
-                select_model=get_sol_id,
-                metric_name=get_spendname,
-                date_range="all",
-                dt_hyppar=dt_hyppar,
-                dt_coef=paretoData.x_decomp_agg,  # Still use full dataframe here
-                quiet=True,
-            )
-
-            mean_spend_adstocked = np.mean(response_output.input_total[startRW:endRW])
-            mean_carryover = np.mean(response_output.input_carryover[startRW:endRW])
-
-            # Use pre-cached coefficient data
-            chn_adstocked = pd.DataFrame(
-                {get_spendname: response_output.input_total[startRW:endRW]}
-            )
-            dt_coef_row = sol_cache["dt_coef"][get_spendname]
-            dt_coef = pd.DataFrame([dt_coef_row])
-
-            hill_calculator = HillCalculator(
-                mmmdata=self.mmm_data,
-                model_outputs=self.model_outputs,
-                dt_hyppar=dt_hyppar,
-                dt_coef=dt_coef,
-                media_spend_sorted=[get_spendname],
-                select_model=get_sol_id,
-                chn_adstocked=chn_adstocked,
-            )
-            hills = hill_calculator.get_hill_params()
-
-            mean_response = ParetoUtils.calculate_fx_objective(
-                x=row["mean_spend"],
-                coeff=hills["coefs_sorted"][0],
-                alpha=hills["alphas"][0],
-                inflexion=hills["inflexions"][0],
-                x_hist_carryover=mean_carryover,
-                get_sum=False,
-            )
-
-            return pd.Series(
-                {
-                    "mean_response": mean_response,
-                    "mean_spend_adstocked": mean_spend_adstocked,
-                    "mean_carryover": mean_carryover,
-                    "rn": row["rn"],
-                    "sol_id": row["sol_id"],
-                }
-            )
-        except Exception as e:
-            print(
-                f"Error processing row for sol_id {row.get('sol_id', 'unknown')}, "
-                f"rn {row.get('rn', 'unknown')}: {str(e)}"
-            )
-            return None
-
     def compute_response_curves(
         self, pareto_data: ParetoData, aggregated_data: Dict[str, pd.DataFrame]
     ) -> ParetoData:
@@ -747,12 +633,6 @@ class ResponseCurveCalculator:
         )
         resp_collect_list = []
         try:
-            # Pre-compute cached data for all sol_ids to avoid repeated DataFrame filtering
-            self.logger.debug(
-                "Pre-caching hyperparameters and coefficients by sol_id..."
-            )
-            cached_data = self._prepare_cached_data(pareto_data)
-
             try:
                 batch = pareto_data.decomp_spend_dist
                 if self.model_outputs.cores > 1:
@@ -760,9 +640,7 @@ class ResponseCurveCalculator:
                         f"Calculating response curves with {self.model_outputs.cores} cores"
                     )
                     run_dt_resp_partial = partial(
-                        self.run_dt_resp_optimized,
-                        paretoData=pareto_data,
-                        cached_data=cached_data,
+                        self.run_dt_resp, paretoData=pareto_data
                     )
 
                     with ThreadPoolExecutor(
@@ -793,13 +671,9 @@ class ResponseCurveCalculator:
                 else:
                     # Run sequentially
                     results = []
-                    for _, row in tqdm(
-                        batch.iterrows(), total=len(batch), desc="Processing rows"
-                    ):
+                    for _, row in batch.iterrows():
                         try:
-                            result = self.run_dt_resp_optimized(
-                                row, paretoData=pareto_data, cached_data=cached_data
-                            )
+                            result = self.run_dt_resp(row, paretoData=pareto_data)
                             if result is not None:
                                 results.append(result)
                         except Exception as e:
