@@ -444,7 +444,7 @@ class BudgetAllocator:
                 inflexion=self.inflexions[f"{media}_gammas"],
                 x_hist_carryover=hist_carryover_temp.mean(),
                 theta=self.thetas[media],  # Add theta parameter
-                get_sum=False,
+                get_sum=True,
             )
 
             resp_simulate_plus1 = self._fx_objective(
@@ -454,7 +454,7 @@ class BudgetAllocator:
                 inflexion=self.inflexions[f"{media}_gammas"],
                 x_hist_carryover=hist_carryover_temp.mean(),
                 theta=self.thetas[media],  # Add theta parameter
-                get_sum=False,
+                get_sum=True,
             )
 
             # Store response values
@@ -879,7 +879,7 @@ class BudgetAllocator:
                     inflexion=self.inflexions_eval[f"{channel}_gammas"],
                     x_hist_carryover=x_hist_carryover[channel],
                     theta=self.thetas[channel],
-                    get_sum=False,
+                    get_sum=True,
                 )
                 response_plus = self._fx_objective(
                     x=current_spend + allocation_this_cycle,
@@ -888,7 +888,7 @@ class BudgetAllocator:
                     inflexion=self.inflexions_eval[f"{channel}_gammas"],
                     x_hist_carryover=x_hist_carryover[channel],
                     theta=self.thetas[channel],
-                    get_sum=False,
+                    get_sum=True,
                 )
                 marginal_response = (
                     response_plus - current_response
@@ -958,7 +958,7 @@ class BudgetAllocator:
                 inflexion=self.inflexions_eval[f"{ch}_gammas"],
                 x_hist_carryover=x_hist_carryover[ch],
                 theta=self.thetas[ch],
-                get_sum=False,
+                get_sum=True,
             )
             for ch in self.channel_for_allocation
         }
@@ -986,7 +986,7 @@ class BudgetAllocator:
                 inflexion=self.inflexions_eval[f"{ch}_gammas"],
                 x_hist_carryover=x_hist_carryover[ch],
                 theta=self.thetas[ch],
-                get_sum=False,
+                get_sum=True,
             )
             for ch in self.channel_for_allocation
         }
@@ -1011,7 +1011,7 @@ class BudgetAllocator:
                     inflexion=self.inflexions_eval[f"{channel}_gammas"],
                     x_hist_carryover=x_hist_carryover[channel],
                     theta=self.thetas[channel],
-                    get_sum=False,
+                    get_sum=True,
                 )
                 - optimized_responses[channel]
             ) / last_allocation
@@ -1027,7 +1027,7 @@ class BudgetAllocator:
                     inflexion=self.inflexions_eval[f"{channel}_gammas"],
                     x_hist_carryover=x_hist_carryover[channel],
                     theta=self.thetas[channel],
-                    get_sum=False,
+                    get_sum=True,
                 )
                 - optimized_responses_unbounded[channel]
             ) / last_allocation_unb
@@ -1347,7 +1347,7 @@ class BudgetAllocator:
                 * 10,
                 50_000_000,
             )
-            simulate_spend = np.linspace(0, max_x, 500)
+            simulate_spend = np.linspace(0, max_x, 2000)
 
             # Choose carryover value based on flag
             carryover_for_simulation = (
@@ -1371,7 +1371,7 @@ class BudgetAllocator:
                 inflexion=self.inflexions_eval[f"{channel}_gammas"],
                 x_hist_carryover=0,
                 theta=self.thetas[channel],  # Add theta parameter
-                get_sum=False,
+                get_sum=True,
             )
 
             # Create arrays of consistent length
