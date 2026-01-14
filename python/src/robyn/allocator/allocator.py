@@ -101,6 +101,99 @@ class BudgetAllocator:
         # TODO: Implement optimization logic
         raise NotImplementedError("Optimization not implemented yet")
 
+    def calculate_response_for_budget(
+        self, budget_allocation: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """
+        Calculate response for a given budget allocation.
+
+        Args:
+            budget_allocation: Dictionary with channel names as keys and per-unit
+                budgets as values. Budgets should be in the same units as
+                init_spend_unit (mean spend per period).
+
+        Returns:
+            Dictionary containing:
+            - total_response: Total response (including carryover) for each channel
+            - carryover_response: Response from carryover only for each channel
+            - total_response_total: Sum of total responses across all channels
+            - carryover_response_total: Sum of carryover responses across all channels
+
+        Raises:
+            ValueError: If any channel in budget_allocation is not found in the model
+        """
+        # Convert media_spend_sorted to list if it's a numpy array
+        media_spend_list = (
+            list(self.media_spend_sorted)
+            if isinstance(self.media_spend_sorted, np.ndarray)
+            else self.media_spend_sorted
+        )
+
+        # Validate that all channels exist
+        invalid_channels = [
+            ch for ch in budget_allocation.keys() if ch not in media_spend_list
+        ]
+        if invalid_channels:
+            raise ValueError(
+                f"Invalid channel names: {invalid_channels}. "
+                f"Available channels: {media_spend_list}"
+            )
+
+        # Initialize result dictionaries
+        total_response = {}
+        carryover_response = {}
+
+        # Calculate response for each channel
+        for channel in budget_allocation.keys():
+            budget = budget_allocation[channel]
+
+            # Get coefficient for this channel (use coefs_sorted which has all channels)
+            if channel not in self.coefs_sorted.index:
+                # Channel has zero coefficient, return zero response
+                total_response[channel] = 0.0
+                carryover_response[channel] = 0.0
+                continue
+
+            coeff = self.coefs_sorted[channel]
+
+            # Get historical carryover mean for this channel
+            hist_carryover_mean = np.mean(self.hist_carryover[channel])
+
+            # Calculate total response (including carryover)
+            total_resp = self._fx_objective(
+                x=budget,
+                coeff=coeff,
+                alpha=self.alphas[f"{channel}_alphas"],
+                inflexion=self.inflexions[f"{channel}_gammas"],
+                x_hist_carryover=hist_carryover_mean,
+                theta=self.thetas[channel],
+                get_sum=True,
+            )
+            total_response[channel] = total_resp
+
+            # Calculate carryover response only (response from historical carryover)
+            carryover_resp = self._fx_objective(
+                x=hist_carryover_mean,
+                coeff=coeff,
+                alpha=self.alphas[f"{channel}_alphas"],
+                inflexion=self.inflexions[f"{channel}_gammas"],
+                x_hist_carryover=0,
+                theta=self.thetas[channel],
+                get_sum=True,
+            )
+            carryover_response[channel] = carryover_resp
+
+        # Calculate totals
+        total_response_total = sum(total_response.values())
+        carryover_response_total = sum(carryover_response.values())
+
+        return {
+            "total_response": total_response,
+            "carryover_response": carryover_response,
+            "total_response_total": total_response_total,
+            "carryover_response_total": carryover_response_total,
+        }
+
     def _setup_local_data_and_params(self) -> None:
         """Set up local data and parameters for the allocator"""
         # Get paid media spends and sort them
