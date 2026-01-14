@@ -101,6 +101,128 @@ class BudgetAllocator:
         # TODO: Implement optimization logic
         raise NotImplementedError("Optimization not implemented yet")
 
+    def calculate_response_for_budget(
+        self,
+        budget_allocation: Union[float, Dict[str, float]],
+        marginal_increment: float = 1.0,
+    ) -> Dict[str, Union[float, pd.Series, Dict[str, float]]]:
+        """
+        Calculate response for a given budget allocation, separating marginal and carryover responses.
+
+        Args:
+            budget_allocation: Either a single float (total budget to distribute proportionally)
+                              or a dict mapping channel names to budget amounts
+            marginal_increment: Increment used to calculate marginal response (default: 1.0)
+
+        Returns:
+            Dictionary containing:
+                - 'total_response': Total response including carryover (pd.Series per channel)
+                - 'marginal_response': Marginal response from incremental spend (pd.Series per channel)
+                - 'carryover_response': Response from historical carryover only (pd.Series per channel)
+                - 'total_response_sum': Sum of total responses across all channels (float)
+                - 'marginal_response_sum': Sum of marginal responses across all channels (float)
+                - 'carryover_response_sum': Sum of carryover responses across all channels (float)
+                - 'budget_allocation': The budget allocation used (dict)
+        """
+        # Handle budget allocation input
+        if isinstance(budget_allocation, (int, float)):
+            # Distribute total budget proportionally based on initial spend shares
+            total_budget = float(budget_allocation)
+            budget_dict = {
+                channel: total_budget * self.init_spend_share[channel]
+                for channel in self.channel_for_allocation
+            }
+        elif isinstance(budget_allocation, dict):
+            budget_dict = budget_allocation.copy()
+            # Ensure all channels are included, set to 0 if not specified
+            for channel in self.channel_for_allocation:
+                if channel not in budget_dict:
+                    budget_dict[channel] = 0.0
+        else:
+            raise TypeError(
+                "budget_allocation must be a float (total budget) or dict (channel->budget mapping)"
+            )
+
+        # Initialize result dictionaries
+        total_response = pd.Series(index=self.media_spend_sorted, dtype=float)
+        marginal_response = pd.Series(index=self.media_spend_sorted, dtype=float)
+        carryover_response = pd.Series(index=self.media_spend_sorted, dtype=float)
+
+        # Calculate responses for each channel
+        for channel in self.media_spend_sorted:
+            if channel not in self.channel_for_allocation:
+                # Skip excluded channels (zero coefficient or zero constraint)
+                total_response[channel] = 0.0
+                marginal_response[channel] = 0.0
+                carryover_response[channel] = 0.0
+                continue
+
+            # Get channel-specific parameters
+            channel_budget = budget_dict.get(channel, 0.0)
+            hist_carryover_mean = np.mean(self.hist_carryover[channel])
+
+            # Use coefs_sorted for consistency (has all channels)
+            coeff = self.coefs_sorted[channel]
+            alpha = self.alphas_eval[f"{channel}_alphas"]
+            inflexion = self.inflexions_eval[f"{channel}_gammas"]
+            theta = self.thetas[channel]
+
+            # Calculate total response (with carryover)
+            resp_total = self._fx_objective(
+                x=channel_budget,
+                coeff=coeff,
+                alpha=alpha,
+                inflexion=inflexion,
+                x_hist_carryover=hist_carryover_mean,
+                theta=theta,
+                get_sum=True,
+            )
+
+            # Calculate carryover response only (no new spend, only historical carryover)
+            resp_carryover_only = self._fx_objective(
+                x=0.0,  # No new spend
+                coeff=coeff,
+                alpha=alpha,
+                inflexion=inflexion,
+                x_hist_carryover=hist_carryover_mean,
+                theta=theta,
+                get_sum=True,
+            )
+
+            # Calculate marginal response (incremental response from additional spend)
+            resp_marginal = (
+                self._fx_objective(
+                    x=channel_budget + marginal_increment,
+                    coeff=coeff,
+                    alpha=alpha,
+                    inflexion=inflexion,
+                    x_hist_carryover=hist_carryover_mean,
+                    theta=theta,
+                    get_sum=True,
+                )
+                - resp_total
+            )
+
+            # Store results
+            total_response[channel] = resp_total
+            marginal_response[channel] = resp_marginal / marginal_increment
+            carryover_response[channel] = resp_carryover_only
+
+        # Calculate sums
+        total_response_sum = total_response.sum()
+        marginal_response_sum = marginal_response.sum()
+        carryover_response_sum = carryover_response.sum()
+
+        return {
+            "total_response": total_response,
+            "marginal_response": marginal_response,
+            "carryover_response": carryover_response,
+            "total_response_sum": float(total_response_sum),
+            "marginal_response_sum": float(marginal_response_sum),
+            "carryover_response_sum": float(carryover_response_sum),
+            "budget_allocation": budget_dict,
+        }
+
     def _setup_local_data_and_params(self) -> None:
         """Set up local data and parameters for the allocator"""
         # Get paid media spends and sort them
